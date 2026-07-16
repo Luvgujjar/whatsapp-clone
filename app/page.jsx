@@ -10,29 +10,29 @@ export default function WhatsAppClone() {
   const [currentUser, setCurrentUser] = useState('');
   const [password, setPassword] = useState('');
   const [emailOrPhone, setEmailOrPhone] = useState('');
-  const [authMode, setAuthMode] = useState('signin'); // 'signin' or 'signup'
-  const [authError, setAuthError] = useState(''); // NEW: Track authentication errors
+  const [authMode, setAuthMode] = useState('signin');
+  const [authError, setAuthError] = useState('');
   const [isLogged, setIsLogged] = useState(false);
   const [messages, setMessages] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [newChatPrompt, setNewChatPrompt] = useState(false);
   
-  // NEW: Menu, Emojis, and File States
+  // NEW: State for tracking invalid username searches
+  const [newChatPrompt, setNewChatPrompt] = useState(false);
+  const [newChatError, setNewChatError] = useState('');
+  
   const [showMenu, setShowMenu] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const attachmentRef = useRef(null);
   const emojis = ['😀','😂','🥺','😍','🙏','👍','🔥','❤️','🎉','✨','😭','😊','🥰','😎','🤔','🙌'];
   
-  // NEW: Profile States
   const [showProfile, setShowProfile] = useState(false);
   const [userProfile, setUserProfile] = useState({ displayName: '', photo: '' });
   const [editName, setEditName] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const fileInputRef = useRef(null);
 
-  // NEW: Store contact profiles so we can see other users' photos
   const [contactProfiles, setContactProfiles] = useState({});
   const fetchingProfiles = useRef(new Set());
 
@@ -43,7 +43,6 @@ export default function WhatsAppClone() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, activeChat]);
 
-  // NEW: Fetch Profile Data on Login
   useEffect(() => {
     if (isLogged) {
       fetch(`/api/profile?username=${currentUser}`)
@@ -59,7 +58,6 @@ export default function WhatsAppClone() {
     }
   }, [isLogged, currentUser]);
 
-  // NEW: Handle Photo Upload (Convert to Base64)
   const handlePhotoUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -73,7 +71,6 @@ export default function WhatsAppClone() {
     }
   };
 
-  // NEW: Save Profile to API
   const saveProfile = async (dataToSave) => {
     try {
       await fetch('/api/profile', {
@@ -89,7 +86,6 @@ export default function WhatsAppClone() {
     }
   };
 
-  // NEW: Handle Logout
   const handleLogout = () => {
     setIsLogged(false);
     setCurrentUser('');
@@ -99,10 +95,9 @@ export default function WhatsAppClone() {
     setShowMenu(false);
     setShowProfile(false);
     setContactProfiles({});
-    lastSyncRef.current = 0; // FIX: Reset the sync timer so we fetch history on next login
+    lastSyncRef.current = 0;
   };
 
-  // --- HTTP POLLING ENGINE ---
   useEffect(() => {
     if (!isLogged) return;
     let isMounted = true;
@@ -129,7 +124,7 @@ export default function WhatsAppClone() {
     };
 
     poll();
-    const intervalId = setInterval(poll, 2000); // 2-second polling
+    const intervalId = setInterval(poll, 2000);
     return () => {
       isMounted = false;
       clearInterval(intervalId);
@@ -142,9 +137,8 @@ export default function WhatsAppClone() {
 
     const textToSend = inputText.trim();
     setInputText('');
-    setShowEmojis(false); // Close emojis on send
+    setShowEmojis(false);
 
-    // Optimistic UI Update - Fixed Template Literal
     const optimisticMsg = {
       id: `temp_${Date.now()}`,
       sender: currentUser,
@@ -160,7 +154,6 @@ export default function WhatsAppClone() {
     setMessages(prev => [...prev, optimisticMsg]);
     lastSyncRef.current = optimisticMsg.timestamp;
 
-    // HTTP POST Request
     try {
       const res = await fetch('/api/messages', {
         method: 'POST',
@@ -181,7 +174,6 @@ export default function WhatsAppClone() {
     }
   };
 
-  // NEW: Handle File Upload (Images and Docs)
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !activeChat) return;
@@ -225,7 +217,7 @@ export default function WhatsAppClone() {
       }
     };
     reader.readAsDataURL(file);
-    e.target.value = ''; // Reset input so you can upload the same file again if needed
+    e.target.value = '';
   };
 
   const conversations = React.useMemo(() => {
@@ -261,12 +253,10 @@ export default function WhatsAppClone() {
     );
   }, [messages, activeChat, currentUser]);
 
-  // NEW: Dynamically fetch profiles of contacts in our conversations
   useEffect(() => {
     if (!isLogged) return;
     
     const fetchContactProfile = (contact) => {
-      // If we already have it, or are currently fetching it, skip
       if (!contact || contactProfiles[contact] || fetchingProfiles.current.has(contact)) return;
       
       fetchingProfiles.current.add(contact);
@@ -284,18 +274,16 @@ export default function WhatsAppClone() {
         .catch(err => console.error(`Failed to fetch profile for ${contact}`, err));
     };
 
-    // Fetch for all users in the chat list
     if (conversations) {
       conversations.forEach(c => fetchContactProfile(c.contact));
     }
-    // Fetch for the active chat (in case we just searched them up)
     if (activeChat) fetchContactProfile(activeChat);
   }, [conversations, activeChat, isLogged]);
 
   if (!isLogged) {
     const handleAuth = async (e) => {
       e.preventDefault();
-      setAuthError(''); // Clear previous errors
+      setAuthError('');
       
       const endpoint = authMode === 'signup' ? '/api/auth/register' : '/api/auth/login';
       const payload = authMode === 'signup' 
@@ -430,7 +418,6 @@ export default function WhatsAppClone() {
           {/* LEFT SIDEBAR */}
           <div className={`flex flex-col w-full md:w-[350px] lg:w-[400px] border-r border-[#e9edef] transition-all duration-300 ${activeChat ? 'hidden md:flex' : 'flex'} relative overflow-hidden`}>
             
-            {/* NEW: PROFILE DRAWER (Overlays the sidebar) */}
             <div className={`absolute inset-0 bg-[#f0f2f5] z-50 flex flex-col transition-transform duration-300 ease-in-out ${showProfile ? 'translate-x-0' : '-translate-x-full'}`}>
               <div className="h-[108px] bg-[#008069] flex items-end pb-4 px-6 text-white gap-6 shrink-0 shadow-sm">
                 <button onClick={() => setShowProfile(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors">
@@ -515,8 +502,14 @@ export default function WhatsAppClone() {
                 <span className="font-semibold text-[#111b21]">{userProfile.displayName || currentUser}</span>
               </div>
               <div className="flex items-center gap-3 text-[#54656f]">
-                <button onClick={() => setNewChatPrompt(!newChatPrompt)} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors">
-                  <Search size={20} />
+                <button 
+                  onClick={() => { 
+                    setNewChatPrompt(!newChatPrompt); 
+                    setNewChatError(''); // Clear errors when toggling
+                  }} 
+                  className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors"
+                >
+                  <MessageSquare size={20} />
                 </button>
                 <div className="relative">
                   <button onClick={() => setShowMenu(!showMenu)} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors">
@@ -532,18 +525,39 @@ export default function WhatsAppClone() {
               </div>
             </div>
 
+            {/* NEW CHAT PROMPT WITH VALIDATION */}
             {newChatPrompt && (
               <div className="bg-white p-3 border-b border-[#e9edef]">
-                 <form onSubmit={(e) => { 
+                 <form onSubmit={async (e) => { 
                     e.preventDefault(); 
+                    setNewChatError(''); // Reset error
+                    
                     const target = e.target.elements.contact.value.toLowerCase().trim();
-                    if(target && target !== currentUser) {
-                      setActiveChat(target);
-                      setNewChatPrompt(false);
+                    if(!target || target === currentUser) return;
+                    
+                    try {
+                      // Ask the database if this user actually exists
+                      const res = await fetch(`/api/profile?username=${target}`);
+                      const data = await res.json();
+                      
+                      if (data.username) {
+                        // User exists! Open the chat.
+                        setActiveChat(target);
+                        setNewChatPrompt(false);
+                        e.target.reset();
+                      } else {
+                        // User does not exist in the DB.
+                        setNewChatError('User not found. Check the username.');
+                      }
+                    } catch (err) {
+                      setNewChatError('Error verifying user.');
                     }
-                 }} className="flex gap-2">
-                    <input name="contact" placeholder="Enter username..." className="flex-1 bg-[#f0f2f5] text-[#41525d] px-3 py-2 rounded-lg text-sm focus:outline-none" autoFocus />
-                    <button type="submit" className="bg-[#00a884] text-white px-4 py-2 rounded-lg text-sm font-medium">Chat</button>
+                 }} className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <input name="contact" placeholder="Enter username..." className="flex-1 bg-[#f0f2f5] text-[#41525d] px-3 py-2 rounded-lg text-sm focus:outline-none" autoFocus />
+                      <button type="submit" className="bg-[#00a884] text-white px-4 py-2 rounded-lg text-sm font-medium">Chat</button>
+                    </div>
+                    {newChatError && <span className="text-red-500 text-xs ml-1 font-medium">{newChatError}</span>}
                  </form>
               </div>
             )}
@@ -659,12 +673,10 @@ export default function WhatsAppClone() {
                         `}>
                           <div className="flex flex-col">
                             
-                            {/* Render Attached Images */}
                             {msg.type === 'image' && msg.media && (
                               <img src={msg.media} alt="attachment" className="max-w-[250px] md:max-w-[300px] rounded-md mb-1 cursor-pointer object-cover" />
                             )}
                             
-                            {/* Render Attached Documents */}
                             {msg.type === 'document' && msg.media && (
                                <div className="flex items-center bg-black/5 p-2 rounded-md mb-1 w-48 truncate">
                                  <Paperclip size={16} className="mr-2 flex-shrink-0 text-[#667781]" />
@@ -672,7 +684,6 @@ export default function WhatsAppClone() {
                                </div>
                             )}
 
-                            {/* Render Standard Text */}
                             {(!msg.type || msg.type === 'text') && (
                               <span className="text-[14.2px] leading-[19px] text-[#111b21] whitespace-pre-wrap break-words pr-8">
                                 {msg.text}
@@ -700,7 +711,6 @@ export default function WhatsAppClone() {
 
                 <div className="min-h-[62px] bg-[#f0f2f5] px-4 py-2 flex items-end gap-3 z-10 border-l border-[#e9edef] relative">
                   
-                  {/* NEW: Emoji Picker Popover */}
                   {showEmojis && (
                     <div className="absolute bottom-[70px] left-4 bg-white shadow-xl rounded-lg p-3 w-[280px] border border-[#e9edef] grid grid-cols-6 gap-2 z-50">
                       {emojis.map(e => (
@@ -720,7 +730,6 @@ export default function WhatsAppClone() {
                     <button type="button" onClick={() => attachmentRef.current?.click()}>
                       <Paperclip size={24} className="cursor-pointer hover:text-[#41525d] transition-colors" />
                     </button>
-                    {/* Hidden File Input */}
                     <input type="file" ref={attachmentRef} onChange={handleFileUpload} className="hidden" />
                   </div>
                   
