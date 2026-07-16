@@ -8,9 +8,13 @@ export async function GET(request) {
   if (!username) return NextResponse.json({ error: 'Username required' }, { status: 400 });
 
   try {
-    const user = db.prepare('SELECT username, contact, display_name, profile_photo FROM users WHERE username = ?').get(username);
-    return NextResponse.json(user || {});
+    const result = await db.execute({
+      sql: 'SELECT username, contact, display_name, profile_photo FROM users WHERE username = ?',
+      args: [username]
+    });
+    return NextResponse.json(result.rows[0] || {});
   } catch (error) {
+    console.error("Profile GET Error:", error);
     return NextResponse.json({ error: 'Database error' }, { status: 500 });
   }
 }
@@ -37,12 +41,15 @@ export async function PUT(request) {
 
     if (updates.length > 0) {
       params.push(username);
-      db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE username = ?`).run(...params);
+      await db.execute({
+        sql: `UPDATE users SET ${updates.join(', ')} WHERE username = ?`,
+        args: params
+      });
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error(error);
+    console.error("Profile PUT Error:", error);
     return NextResponse.json({ error: 'Failed to update profile' }, { status: 500 });
   }
 }

@@ -10,7 +10,12 @@ export async function POST(request) {
     }
 
     // Find the user and verify password
-    const user = db.prepare('SELECT * FROM users WHERE username = ? AND password = ?').get(username, password);
+    const result = await db.execute({
+      sql: 'SELECT * FROM users WHERE username = ? AND password = ?',
+      args: [username, password]
+    });
+
+    const user = result.rows[0];
 
     if (!user) {
       return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 });
@@ -18,7 +23,7 @@ export async function POST(request) {
 
     return NextResponse.json({ success: true, username: user.username });
   } catch (error) {
-    console.error(error);
+    console.error("Login Error:", error);
     return NextResponse.json({ error: 'Server error during login' }, { status: 500 });
   }
 }

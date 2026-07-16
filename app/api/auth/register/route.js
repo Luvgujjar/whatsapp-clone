@@ -10,20 +10,24 @@ export async function POST(request) {
     }
 
     // Check if user already exists
-    const checkUser = db.prepare('SELECT username FROM users WHERE username = ?').get(username);
-    if (checkUser) {
+    const checkUser = await db.execute({
+      sql: 'SELECT username FROM users WHERE username = ?',
+      args: [username]
+    });
+    
+    if (checkUser.rows.length > 0) {
       return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
     }
 
     // Insert new user
-    // Note: In a production app, you MUST hash the password here (e.g., using bcrypt). 
-    // Kept plain text here to stick strictly to minimal dependencies.
-    const stmt = db.prepare('INSERT INTO users (username, password, contact) VALUES (?, ?, ?)');
-    stmt.run(username, password, contact || null);
+    await db.execute({
+      sql: 'INSERT INTO users (username, password, contact) VALUES (?, ?, ?)',
+      args: [username, password, contact || null]
+    });
 
     return NextResponse.json({ success: true, username });
   } catch (error) {
-    console.error(error);
+    console.error("Register Error:", error);
     return NextResponse.json({ error: 'Failed to register user' }, { status: 500 });
   }
 }

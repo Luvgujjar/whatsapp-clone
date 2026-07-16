@@ -10,26 +10,24 @@ export async function GET(request) {
 
   try {
     // Fetch messages where user is sender or receiver, AND newer than 'after'
-    const stmt = db.prepare(`
-      SELECT * FROM messages 
-      WHERE (sender = ? OR receiver = ?) AND timestamp > ? 
-      ORDER BY timestamp ASC
-    `);
-    const newMessages = stmt.all(user, user, after);
+    const result = await db.execute({
+      sql: `SELECT * FROM messages WHERE (sender = ? OR receiver = ?) AND timestamp > ? ORDER BY timestamp ASC`,
+      args: [user, user, after]
+    });
 
-    if (newMessages.length === 0) {
+    if (result.rows.length === 0) {
       return new NextResponse(null, { status: 204 }); // 204 No Content
     }
 
     // Update status to 'delivered' for received messages
-    const updateStmt = db.prepare(`
-      UPDATE messages SET status = 'delivered' 
-      WHERE receiver = ? AND status = 'sent' AND timestamp > ?
-    `);
-    updateStmt.run(user, after);
+    await db.execute({
+      sql: `UPDATE messages SET status = 'delivered' WHERE receiver = ? AND status = 'sent' AND timestamp > ?`,
+      args: [user, after]
+    });
 
-    return NextResponse.json(newMessages);
+    return NextResponse.json(result.rows);
   } catch (error) {
+    console.error("Sync API Error:", error);
     return NextResponse.json({ error: 'Database error' }, { status: 500 });
   }
 }
