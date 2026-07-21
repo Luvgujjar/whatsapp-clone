@@ -9,6 +9,12 @@ export async function GET(request) {
   if (!user) return NextResponse.json({ error: 'User required' }, { status: 400 });
 
   try {
+    // Update the user's last active timestamp to appear "Online"
+    await db.execute({
+      sql: `UPDATE users SET last_seen = ? WHERE username = ?`,
+      args: [Date.now(), user]
+    }).catch(err => console.error("Failed to update last_seen", err));
+
     // Fetch messages where user is sender or receiver, AND newer than 'after'
     const result = await db.execute({
       sql: `SELECT * FROM messages WHERE (sender = ? OR receiver = ?) AND timestamp > ? ORDER BY timestamp ASC`,

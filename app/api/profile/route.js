@@ -9,7 +9,7 @@ export async function GET(request) {
 
   try {
     const result = await db.execute({
-      sql: 'SELECT username, contact, display_name, profile_photo FROM users WHERE username = ?',
+      sql: 'SELECT username, contact, display_name, profile_photo, last_seen FROM users WHERE username = ?',
       args: [username]
     });
     return NextResponse.json(result.rows[0] || {});

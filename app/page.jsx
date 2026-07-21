@@ -20,14 +20,15 @@ export default function WhatsAppClone() {
   const [searchQuery, setSearchQuery] = useState('');
   
   const [newChatPrompt, setNewChatPrompt] = useState(false);
-  const [newChatError, setNewChatError] = useState(''); // NEW STATE FOR ERROR
+  const [newChatError, setNewChatError] = useState('');
   
   const [showMenu, setShowMenu] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const attachmentRef = useRef(null);
-  const emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥸','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🫣','🤭','🫢','🤫','🤥','😶','🫠','😐','🫤','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','💀','☠️','👻','👽','🤖','💩','🔥','✨','⭐','🌟','💯','❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','👍','👎','👏','🙌','👌','✌️','🤞','🤟','🤘','👋','🤝','🙏','💪','👀','🎉','🎊','🎁','🏆','🥇','🚀','🌈','⚡','☀️','🌙','🍕','🍔','🍟','🍎','🍉','🍇','🍓','☕','🍺','⚽','🏀','🎮','🎧','📱','💻','⌚','📷','🎥','🚗','✈️','🚆','🏠','🌍'];
+  const emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥸','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🫣','🤭','🫢','🤫','🤥','😶','🫠','😐','🫤','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','💀','☠️','👻','👽','🤖','💩','🔥','✨','⭐','🌟','💯','❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','👍','👎','👏','🙌','👌','✌️','🤞','🤟','🤘','👋','🤝','🙏','💪','👀','🎉','🎊','🎁','🏆','🥇','🚀','🌈','⚡','☀️','🌙','⭐','🍕','🍔','🍟','🍎','🍉','🍇','🍓','☕','🍺','⚽','🏀','🎮','🎧','📱','💻','⌚','📷','🎥','🚗','✈️','🚆','🏠','🌍'];
   
   const [showProfile, setShowProfile] = useState(false);
+  const [showContactInfo, setShowContactInfo] = useState(false); // NEW: Contact Info Drawer State
   const [userProfile, setUserProfile] = useState({ displayName: '', photo: '' });
   const [editName, setEditName] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -42,14 +43,21 @@ export default function WhatsAppClone() {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const timerRef = useRef(null);
-  const isCancelledRef = useRef(false); // To handle canceling recordings
+  const isCancelledRef = useRef(false);
 
   const lastSyncRef = useRef(0);
   const messagesEndRef = useRef(null);
 
+  // Auto-scroll to bottom of chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, activeChat]);
+
+  // Check if a user is online (pinged within the last 15 seconds)
+  const isOnline = (lastSeen) => {
+    if (!lastSeen) return false;
+    return (Date.now() - lastSeen) < 15000; 
+  };
 
   useEffect(() => {
     if (isLogged) {
@@ -102,8 +110,9 @@ export default function WhatsAppClone() {
     setActiveChat(null);
     setShowMenu(false);
     setShowProfile(false);
+    setShowContactInfo(false);
     setContactProfiles({});
-    lastSyncRef.current = 0; // Reset time so chats reload on next login
+    lastSyncRef.current = 0; 
   };
 
   // --- HTTP POLLING ENGINE ---
@@ -113,7 +122,28 @@ export default function WhatsAppClone() {
 
     const poll = async () => {
       try {
+        // Ping the server to get messages and update our own last_seen
         const res = await fetch(`/api/sync?user=${currentUser}&after=${lastSyncRef.current}`);
+        
+        // Fetch active chat's profile in the background to update their online status live
+        if (activeChat && isMounted) {
+            fetch(`/api/profile?username=${activeChat}`)
+              .then(r => r.json())
+              .then(data => {
+                  if (isMounted) {
+                      setContactProfiles(prev => ({
+                          ...prev,
+                          [activeChat]: {
+                              displayName: data.display_name || activeChat,
+                              photo: data.profile_photo || '',
+                              contact: data.contact || '',
+                              lastSeen: data.last_seen || 0
+                          }
+                      }));
+                  }
+              }).catch(() => {});
+        }
+
         if (!isMounted || res.status === 204) return;
 
         const newMsgs = await res.json();
@@ -138,7 +168,7 @@ export default function WhatsAppClone() {
       isMounted = false;
       clearInterval(intervalId);
     };
-  }, [isLogged, currentUser]);
+  }, [isLogged, currentUser, activeChat]);
 
   const handleSendMessage = async (e) => {
     e?.preventDefault();
@@ -162,7 +192,7 @@ export default function WhatsAppClone() {
       sendPayload(file.name, fileType, base64);
     };
     reader.readAsDataURL(file);
-    e.target.value = ''; // Reset input
+    e.target.value = ''; 
   };
 
   const startRecording = async () => {
@@ -178,9 +208,9 @@ export default function WhatsAppClone() {
       };
 
       mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach(track => track.stop()); // Turn off mic light
+        stream.getTracks().forEach(track => track.stop()); 
         
-        if (isCancelledRef.current) return; // Discard if cancelled
+        if (isCancelledRef.current) return; 
         
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const reader = new FileReader();
@@ -308,7 +338,9 @@ export default function WhatsAppClone() {
             ...prev,
             [contact]: {
               displayName: data.display_name || contact,
-              photo: data.profile_photo || ''
+              photo: data.profile_photo || '',
+              contact: data.contact || '',
+              lastSeen: data.last_seen || 0
             }
           }));
         })
@@ -318,8 +350,7 @@ export default function WhatsAppClone() {
     if (conversations) {
       conversations.forEach(c => fetchContactProfile(c.contact));
     }
-    if (activeChat) fetchContactProfile(activeChat);
-  }, [conversations, activeChat, isLogged]);
+  }, [conversations, isLogged]);
 
   if (!isLogged) {
     const handleAuth = async (e) => {
@@ -454,7 +485,7 @@ export default function WhatsAppClone() {
   return (
     <div className="flex h-screen w-full bg-[#d1d7db] font-sans overflow-hidden">
       <div className="flex w-full h-full max-w-[1600px] mx-auto md:py-4 md:px-4 shadow-xl">
-        <div className="flex w-full h-full bg-white md:rounded-lg overflow-hidden shadow-sm">
+        <div className="flex w-full h-full bg-white md:rounded-lg overflow-hidden shadow-sm relative">
           
           {/* LEFT SIDEBAR */}
           <div className={`flex flex-col w-full md:w-[350px] lg:w-[400px] border-r border-[#e9edef] transition-all duration-300 ${activeChat ? 'hidden md:flex' : 'flex'} relative overflow-hidden`}>
@@ -470,7 +501,7 @@ export default function WhatsAppClone() {
               
               <div className="flex-1 overflow-y-auto">
                 <div className="flex justify-center py-7">
-                  <div className="relative group cursor-pointer w-48 h-48 rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center text-white" onClick={() => fileInputRef.current?.click()}>
+                  <div className="relative group cursor-pointer w-48 h-48 rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center text-white shadow-sm" onClick={() => fileInputRef.current?.click()}>
                     {userProfile.photo ? (
                       <img src={userProfile.photo} alt="Profile" className="w-full h-full object-cover" />
                     ) : (
@@ -571,20 +602,20 @@ export default function WhatsAppClone() {
               <div className="bg-white p-3 border-b border-[#e9edef]">
                  <form onSubmit={async (e) => { 
                     e.preventDefault(); 
-                    setNewChatError(''); // clear previous errors
+                    setNewChatError('');
                     
                     const target = e.target.elements.contact.value.toLowerCase().trim();
                     if(!target || target === currentUser) return;
                     
                     try {
-                      // Check if user exists
                       const res = await fetch(`/api/profile?username=${target}`);
                       const data = await res.json();
                       
                       if (data.username) {
                         setActiveChat(target);
+                        setShowContactInfo(false); // Reset right drawer on new chat
                         setNewChatPrompt(false);
-                        e.target.reset(); // clear input
+                        e.target.reset();
                       } else {
                         setNewChatError('User not found. Check the username.');
                       }
@@ -623,10 +654,10 @@ export default function WhatsAppClone() {
                 conversations.map((chat) => (
                   <div 
                     key={chat.contact}
-                    onClick={() => setActiveChat(chat.contact)}
+                    onClick={() => { setActiveChat(chat.contact); setShowContactInfo(false); }}
                     className={`flex items-center px-3 py-2.5 cursor-pointer hover:bg-[#f5f6f6] transition-colors ${activeChat === chat.contact ? 'bg-[#f0f2f5]' : ''}`}
                   >
-                    <div className="w-12 h-12 bg-[#dfe5e7] rounded-full flex items-center justify-center text-white mr-3 flex-shrink-0 overflow-hidden">
+                    <div className="w-12 h-12 bg-[#dfe5e7] rounded-full flex items-center justify-center text-white mr-3 flex-shrink-0 overflow-hidden relative">
                       {contactProfiles[chat.contact]?.photo ? (
                         <img src={contactProfiles[chat.contact].photo} alt="Profile" className="w-full h-full object-cover" />
                       ) : (
@@ -635,8 +666,11 @@ export default function WhatsAppClone() {
                     </div>
                     <div className="flex-1 min-w-0 border-b border-[#f2f2f2] pb-2 pt-1">
                       <div className="flex justify-between items-baseline mb-0.5">
-                        <span className="font-normal text-base text-[#111b21] truncate">
+                        <span className="font-normal text-base text-[#111b21] truncate flex items-center gap-1.5">
                           {contactProfiles[chat.contact]?.displayName || chat.contact}
+                          {isOnline(contactProfiles[chat.contact]?.lastSeen) && (
+                            <span className="w-2 h-2 bg-[#25D366] rounded-full shadow-sm"></span>
+                          )}
                         </span>
                         <span className="text-xs text-[#667781]">
                           {new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -657,8 +691,9 @@ export default function WhatsAppClone() {
             </div>
           </div>
 
+          {}
           {/* RIGHT CHAT AREA */}
-          <div className={`flex-col flex-1 bg-[#efeae2] relative ${!activeChat ? 'hidden md:flex' : 'flex'}`}>
+          <div className={`flex-col flex-1 bg-[#efeae2] relative overflow-hidden ${!activeChat ? 'hidden md:flex' : 'flex'}`}>
             {!activeChat ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-[#f0f2f5] border-l border-[#e9edef]">
                 <h2 className="text-[32px] text-[#41525d] font-light mb-4">WhatsApp Web Clone</h2>
@@ -669,30 +704,48 @@ export default function WhatsAppClone() {
               </div>
             ) : (
               <>
+                {/* ACTIVE CHAT HEADER */}
                 <div className="h-[60px] bg-[#f0f2f5] flex items-center justify-between px-4 z-10 sticky top-0 border-l border-[#e9edef]">
-                  <div className="flex items-center gap-3">
-                    <button className="md:hidden text-[#54656f]" onClick={() => setActiveChat(null)}>
+                  <div className="flex items-center gap-1">
+                    <button className="md:hidden text-[#54656f] mr-1" onClick={() => setActiveChat(null)}>
                       <ArrowLeft size={24} />
                     </button>
-                    <div className="w-10 h-10 bg-[#dfe5e7] rounded-full flex items-center justify-center text-white overflow-hidden">
-                      {contactProfiles[activeChat]?.photo ? (
-                        <img src={contactProfiles[activeChat].photo} alt="Profile" className="w-full h-full object-cover" />
-                      ) : (
-                        <span className="font-semibold text-[#a6b0b5]">{activeChat.charAt(0).toUpperCase()}</span>
-                      )}
-                    </div>
-                    <div>
-                      <h2 className="font-normal text-[#111b21]">
-                        {contactProfiles[activeChat]?.displayName || activeChat}
-                      </h2>
+                    
+                    {/* Clickable Profile Area */}
+                    <div 
+                      className="flex items-center gap-3 cursor-pointer hover:bg-black/5 p-1 rounded-lg transition-colors" 
+                      onClick={() => setShowContactInfo(true)}
+                    >
+                      <div className="w-10 h-10 bg-[#dfe5e7] rounded-full flex items-center justify-center text-white overflow-hidden flex-shrink-0">
+                        {contactProfiles[activeChat]?.photo ? (
+                          <img src={contactProfiles[activeChat].photo} alt="Profile" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="font-semibold text-[#a6b0b5]">{activeChat.charAt(0).toUpperCase()}</span>
+                        )}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h2 className="font-normal text-[#111b21]">
+                            {contactProfiles[activeChat]?.displayName || activeChat}
+                          </h2>
+                          {isOnline(contactProfiles[activeChat]?.lastSeen) && (
+                            <div className="w-2.5 h-2.5 bg-[#25D366] rounded-full shadow-sm border border-[#f0f2f5]"></div>
+                          )}
+                        </div>
+                        <p className="text-xs text-[#667781] mt-0.5">
+                           {isOnline(contactProfiles[activeChat]?.lastSeen) ? 'Online' : 'Offline'}
+                        </p>
+                      </div>
                     </div>
                   </div>
+                  
                   <div className="flex items-center gap-5 text-[#54656f] mr-2">
                     <Video size={22} className="cursor-pointer hover:text-[#41525d] transition-colors" />
                     <Phone size={20} className="cursor-pointer hover:text-[#41525d] transition-colors" />
                   </div>
                 </div>
 
+                {/* CHAT MESSAGES */}
                 <div 
                   className="flex-1 overflow-y-auto p-4 md:px-[6%] lg:px-[9%] py-6 z-0" 
                   style={{
@@ -759,6 +812,7 @@ export default function WhatsAppClone() {
                   <div ref={messagesEndRef} />
                 </div>
 
+                {/* INPUT BAR */}
                 <div className="min-h-[62px] bg-[#f0f2f5] px-4 py-2 flex items-end gap-3 z-10 border-l border-[#e9edef] relative">
                   
                   {showEmojis && (
@@ -783,7 +837,6 @@ export default function WhatsAppClone() {
                     <input type="file" ref={attachmentRef} onChange={handleFileUpload} className="hidden" />
                   </div>
                   
-                  {/* DYNAMIC INPUT AREA */}
                   {isRecording ? (
                     <div className="flex-1 flex items-center justify-between bg-white rounded-lg px-4 py-2.5 h-[44px] mb-[2px] border border-transparent shadow-sm">
                       <div className="flex items-center gap-3">
@@ -828,9 +881,42 @@ export default function WhatsAppClone() {
                     )}
                   </div>
                 </div>
+                
+                {/* CONTACT INFO DRAWER (OVERLAY ON RIGHT) */}
+                <div className={`absolute top-0 right-0 h-full w-full md:w-[350px] lg:w-[400px] bg-[#f0f2f5] z-50 transition-transform duration-300 ease-in-out border-l border-[#e9edef] shadow-2xl flex flex-col ${showContactInfo ? 'translate-x-0' : 'translate-x-full'}`}>
+                  <div className="h-[60px] bg-[#f0f2f5] flex items-center px-6 text-[#54656f] gap-6 shrink-0 border-b border-[#e9edef]">
+                    <button onClick={() => setShowContactInfo(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors">
+                      <ArrowLeft size={24} />
+                    </button>
+                    <h1 className="text-[16px] font-medium text-[#111b21]">Contact info</h1>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto">
+                    <div className="bg-white flex flex-col items-center py-8 shadow-sm mb-2 px-4 text-center">
+                      <div className="w-48 h-48 rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center text-white mb-4 shadow-md">
+                        {contactProfiles[activeChat]?.photo ? (
+                          <img src={contactProfiles[activeChat].photo} alt="Profile" className="w-full h-full object-cover" />
+                        ) : (
+                          <User size={80} className="text-[#a6b0b5]" />
+                        )}
+                      </div>
+                      <h2 className="text-2xl font-normal text-[#111b21] mb-1">
+                        {contactProfiles[activeChat]?.displayName || activeChat}
+                      </h2>
+                      <p className="text-[#667781] text-lg">{contactProfiles[activeChat]?.contact || '~'}</p>
+                    </div>
+
+                    <div className="bg-white px-6 py-4 shadow-sm mb-2">
+                        <p className="text-[#667781] text-sm mb-2">About and phone number</p>
+                        <p className="text-[#111b21] text-base">{contactProfiles[activeChat]?.contact || 'No contact info provided.'}</p>
+                    </div>
+                  </div>
+                </div>
+
               </>
             )}
           </div>
+
         </div>
       </div>
     </div>
