@@ -3,7 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, MoreVertical, MessageSquare, Paperclip, 
   Smile, Mic, Send, Check, CheckCheck, User, 
-  Phone, Video, ArrowLeft, Camera, Save
+  Phone, Video, ArrowLeft, Camera, Save, Trash2,
+  PlusIcon
 } from 'lucide-react';
 
 export default function WhatsAppClone() {
@@ -18,14 +19,13 @@ export default function WhatsAppClone() {
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // NEW: State for tracking invalid username searches
   const [newChatPrompt, setNewChatPrompt] = useState(false);
-  const [newChatError, setNewChatError] = useState('');
+  const [newChatError, setNewChatError] = useState(''); // NEW STATE FOR ERROR
   
   const [showMenu, setShowMenu] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const attachmentRef = useRef(null);
-  const emojis = ['😀','😂','🥺','😍','🙏','👍','🔥','❤️','🎉','✨','😭','😊','🥰','😎','🤔','🙌'];
+  const emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥸','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🫣','🤭','🫢','🤫','🤥','😶','🫠','😐','🫤','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','💀','☠️','👻','👽','🤖','💩','🔥','✨','⭐','🌟','💯','❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','👍','👎','👏','🙌','👌','✌️','🤞','🤟','🤘','👋','🤝','🙏','💪','👀','🎉','🎊','🎁','🏆','🥇','🚀','🌈','⚡','☀️','🌙','🍕','🍔','🍟','🍎','🍉','🍇','🍓','☕','🍺','⚽','🏀','🎮','🎧','📱','💻','⌚','📷','🎥','🚗','✈️','🚆','🏠','🌍'];
   
   const [showProfile, setShowProfile] = useState(false);
   const [userProfile, setUserProfile] = useState({ displayName: '', photo: '' });
@@ -35,6 +35,14 @@ export default function WhatsAppClone() {
 
   const [contactProfiles, setContactProfiles] = useState({});
   const fetchingProfiles = useRef(new Set());
+
+  // --- AUDIO RECORDING STATES ---
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const timerRef = useRef(null);
+  const isCancelledRef = useRef(false); // To handle canceling recordings
 
   const lastSyncRef = useRef(0);
   const messagesEndRef = useRef(null);
@@ -95,9 +103,10 @@ export default function WhatsAppClone() {
     setShowMenu(false);
     setShowProfile(false);
     setContactProfiles({});
-    lastSyncRef.current = 0;
+    lastSyncRef.current = 0; // Reset time so chats reload on next login
   };
 
+  // --- HTTP POLLING ENGINE ---
   useEffect(() => {
     if (!isLogged) return;
     let isMounted = true;
@@ -132,20 +141,92 @@ export default function WhatsAppClone() {
   }, [isLogged, currentUser]);
 
   const handleSendMessage = async (e) => {
-    e.preventDefault();
+    e?.preventDefault();
     if (!inputText.trim() || !activeChat) return;
 
     const textToSend = inputText.trim();
     setInputText('');
     setShowEmojis(false);
+    
+    sendPayload(textToSend, 'text', null);
+  };
 
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file || !activeChat) return;
+    
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64 = reader.result;
+      const fileType = file.type.startsWith('image/') ? 'image' : 'document';
+      sendPayload(file.name, fileType, base64);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = ''; // Reset input
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      isCancelledRef.current = false;
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop()); // Turn off mic light
+        
+        if (isCancelledRef.current) return; // Discard if cancelled
+        
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = async () => {
+          const base64Audio = reader.result;
+          sendPayload('Voice Message', 'audio', base64Audio);
+        };
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error("Error accessing microphone:", err);
+      alert("Microphone access denied. Please check your browser permissions.");
+    }
+  };
+
+  const stopRecording = (send = true) => {
+    isCancelledRef.current = !send;
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      clearInterval(timerRef.current);
+    }
+  };
+
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  const sendPayload = async (text, type, media) => {
     const optimisticMsg = {
       id: `temp_${Date.now()}`,
       sender: currentUser,
       receiver: activeChat,
-      text: textToSend,
-      type: 'text',
-      media: null,
+      text: text,
+      type: type,
+      media: media,
       timestamp: Date.now(),
       status: 'sending',
       pending: true
@@ -161,9 +242,9 @@ export default function WhatsAppClone() {
         body: JSON.stringify({
           sender: currentUser,
           receiver: activeChat,
-          text: textToSend,
-          type: 'text',
-          media: null
+          text: text,
+          type: type,
+          media: media
         })
       });
       
@@ -172,52 +253,6 @@ export default function WhatsAppClone() {
     } catch (error) {
       console.error("Failed to send", error);
     }
-  };
-
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file || !activeChat) return;
-    
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64 = reader.result;
-      const fileType = file.type.startsWith('image/') ? 'image' : 'document';
-      
-      const optimisticMsg = {
-        id: `temp_${Date.now()}`,
-        sender: currentUser,
-        receiver: activeChat,
-        text: file.name,
-        type: fileType,
-        media: base64,
-        timestamp: Date.now(),
-        status: 'sending',
-        pending: true
-      };
-      
-      setMessages(prev => [...prev, optimisticMsg]);
-      lastSyncRef.current = optimisticMsg.timestamp;
-
-      try {
-        const res = await fetch('/api/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sender: currentUser,
-            receiver: activeChat,
-            text: file.name,
-            type: fileType,
-            media: base64
-          })
-        });
-        const savedMsg = await res.json();
-        setMessages(prev => prev.map(m => m.id === optimisticMsg.id ? savedMsg : m));
-      } catch (error) {
-        console.error("Failed to upload file", error);
-      }
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
   };
 
   const conversations = React.useMemo(() => {
@@ -230,13 +265,19 @@ export default function WhatsAppClone() {
       }
     });
 
-    let chatList = Array.from(chatMap.entries()).map(([contact, msg]) => ({
-      contact,
-      lastMessage: msg.text,
-      timestamp: msg.timestamp,
-      isMyLast: msg.sender === currentUser,
-      status: msg.status
-    }));
+    let chatList = Array.from(chatMap.entries()).map(([contact, msg]) => {
+      let preview = msg.text;
+      if (msg.type === 'audio') preview = '🎤 Voice Message';
+      if (msg.type === 'image') preview = '📷 Image';
+      
+      return {
+        contact,
+        lastMessage: preview,
+        timestamp: msg.timestamp,
+        isMyLast: msg.sender === currentUser,
+        status: msg.status
+      };
+    });
 
     chatList.sort((a, b) => b.timestamp - a.timestamp);
     if (searchQuery) {
@@ -418,6 +459,7 @@ export default function WhatsAppClone() {
           {/* LEFT SIDEBAR */}
           <div className={`flex flex-col w-full md:w-[350px] lg:w-[400px] border-r border-[#e9edef] transition-all duration-300 ${activeChat ? 'hidden md:flex' : 'flex'} relative overflow-hidden`}>
             
+            {/* PROFILE DRAWER */}
             <div className={`absolute inset-0 bg-[#f0f2f5] z-50 flex flex-col transition-transform duration-300 ease-in-out ${showProfile ? 'translate-x-0' : '-translate-x-full'}`}>
               <div className="h-[108px] bg-[#008069] flex items-end pb-4 px-6 text-white gap-6 shrink-0 shadow-sm">
                 <button onClick={() => setShowProfile(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors">
@@ -505,11 +547,11 @@ export default function WhatsAppClone() {
                 <button 
                   onClick={() => { 
                     setNewChatPrompt(!newChatPrompt); 
-                    setNewChatError(''); // Clear errors when toggling
+                    setNewChatError(''); 
                   }} 
                   className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors"
                 >
-                  <MessageSquare size={20} />
+                  < PlusIcon size={20} />
                 </button>
                 <div className="relative">
                   <button onClick={() => setShowMenu(!showMenu)} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors">
@@ -525,28 +567,25 @@ export default function WhatsAppClone() {
               </div>
             </div>
 
-            {/* NEW CHAT PROMPT WITH VALIDATION */}
             {newChatPrompt && (
               <div className="bg-white p-3 border-b border-[#e9edef]">
                  <form onSubmit={async (e) => { 
                     e.preventDefault(); 
-                    setNewChatError(''); // Reset error
+                    setNewChatError(''); // clear previous errors
                     
                     const target = e.target.elements.contact.value.toLowerCase().trim();
                     if(!target || target === currentUser) return;
                     
                     try {
-                      // Ask the database if this user actually exists
+                      // Check if user exists
                       const res = await fetch(`/api/profile?username=${target}`);
                       const data = await res.json();
                       
                       if (data.username) {
-                        // User exists! Open the chat.
                         setActiveChat(target);
                         setNewChatPrompt(false);
-                        e.target.reset();
+                        e.target.reset(); // clear input
                       } else {
-                        // User does not exist in the DB.
                         setNewChatError('User not found. Check the username.');
                       }
                     } catch (err) {
@@ -648,6 +687,10 @@ export default function WhatsAppClone() {
                       </h2>
                     </div>
                   </div>
+                  <div className="flex items-center gap-5 text-[#54656f] mr-2">
+                    <Video size={22} className="cursor-pointer hover:text-[#41525d] transition-colors" />
+                    <Phone size={20} className="cursor-pointer hover:text-[#41525d] transition-colors" />
+                  </div>
                 </div>
 
                 <div 
@@ -684,13 +727,20 @@ export default function WhatsAppClone() {
                                </div>
                             )}
 
+                            {msg.type === 'audio' && msg.media && (
+                               <div className="flex items-center gap-2 mb-1 min-w-[200px]">
+                                 <Mic size={20} className={isMe ? 'text-[#00a884]' : 'text-[#8696a0]'} />
+                                 <audio controls src={msg.media} className="w-full h-8" />
+                               </div>
+                            )}
+
                             {(!msg.type || msg.type === 'text') && (
                               <span className="text-[14.2px] leading-[19px] text-[#111b21] whitespace-pre-wrap break-words pr-8">
                                 {msg.text}
                               </span>
                             )}
                             
-                            <div className="flex items-center justify-end gap-1 mt-[-10px] float-right self-end">
+                            <div className={`flex items-center justify-end gap-1 float-right self-end ${msg.type === 'audio' ? 'mt-1' : 'mt-[-10px]'}`}>
                                <span className="text-[10px] text-[#667781] pt-1">
                                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                </span>
@@ -712,7 +762,7 @@ export default function WhatsAppClone() {
                 <div className="min-h-[62px] bg-[#f0f2f5] px-4 py-2 flex items-end gap-3 z-10 border-l border-[#e9edef] relative">
                   
                   {showEmojis && (
-                    <div className="absolute bottom-[70px] left-4 bg-white shadow-xl rounded-lg p-3 w-[280px] border border-[#e9edef] grid grid-cols-6 gap-2 z-50">
+                    <div className="absolute bottom-[70px] left-4 bg-white shadow-xl rounded-lg p-3 w-[280px] max-h-[300px] overflow-y-auto border border-[#e9edef] grid grid-cols-6 gap-2 z-50">
                       {emojis.map(e => (
                         <button key={e} type="button" className="text-xl hover:bg-gray-100 rounded p-1 transition-colors" onClick={() => {
                           setInputText(prev => prev + e);
@@ -733,25 +783,49 @@ export default function WhatsAppClone() {
                     <input type="file" ref={attachmentRef} onChange={handleFileUpload} className="hidden" />
                   </div>
                   
-                  <form onSubmit={handleSendMessage} className="flex-1 flex items-end bg-white rounded-lg overflow-hidden border border-transparent">
-                    <textarea 
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSendMessage(e);
-                        }
-                      }}
-                      placeholder="Type a message"
-                      className="w-full max-h-32 px-4 py-2.5 bg-transparent resize-none focus:outline-none text-[#41525d] text-sm md:text-base leading-snug"
-                      rows={1}
-                    />
-                  </form>
+                  {/* DYNAMIC INPUT AREA */}
+                  {isRecording ? (
+                    <div className="flex-1 flex items-center justify-between bg-white rounded-lg px-4 py-2.5 h-[44px] mb-[2px] border border-transparent shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                        <span className="text-[#41525d] font-medium tracking-wider">{formatTime(recordingTime)}</span>
+                      </div>
+                      <button type="button" onClick={() => stopRecording(false)} className="text-[#8696a0] hover:text-red-500 transition-colors flex items-center gap-1 text-sm font-medium">
+                        <Trash2 size={18} /> Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleSendMessage} className="flex-1 flex items-end bg-white rounded-lg overflow-hidden border border-transparent">
+                      <textarea 
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendMessage(e);
+                          }
+                        }}
+                        placeholder="Type a message"
+                        className="w-full max-h-32 px-4 py-2.5 bg-transparent resize-none focus:outline-none text-[#41525d] text-sm md:text-base leading-snug"
+                        rows={1}
+                      />
+                    </form>
+                  )}
+
                   <div className="text-[#54656f] pb-1.5 flex-shrink-0">
-                    <button onClick={handleSendMessage} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#54656f]">
-                      <Send size={24} />
-                    </button>
+                    {isRecording ? (
+                      <button onClick={() => stopRecording(true)} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#00a884]">
+                        <Send size={24} />
+                      </button>
+                    ) : inputText.trim() ? (
+                      <button onClick={handleSendMessage} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#54656f]">
+                        <Send size={24} />
+                      </button>
+                    ) : (
+                      <button onClick={startRecording} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#54656f]">
+                        <Mic size={24} />
+                      </button>
+                    )}
                   </div>
                 </div>
               </>
