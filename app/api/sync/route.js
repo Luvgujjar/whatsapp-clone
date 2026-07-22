@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import db from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const user = searchParams.get('user');
@@ -9,27 +11,29 @@ export async function GET(request) {
   if (!user) return NextResponse.json({ error: 'User required' }, { status: 400 });
 
   try {
-    // Update the user's last active timestamp to appear "Online"
     await db.execute({
       sql: `UPDATE users SET last_seen = ? WHERE username = ?`,
       args: [Date.now(), user]
     }).catch(err => console.error("Failed to update last_seen", err));
 
-    // Fetch messages where user is sender or receiver, AND newer than 'after'
     const result = await db.execute({
-      sql: `SELECT * FROM messages WHERE (sender = ? OR receiver = ?) AND timestamp > ? ORDER BY timestamp ASC`,
-      args: [user, user, after]
+      sql: `SELECT * FROM messages WHERE (
+              (sender = ? AND receiver NOT LIKE '#group_%') 
+              OR receiver = ? 
+              OR receiver IN (SELECT group_id FROM group_members WHERE username = ?)
+            ) AND timestamp > ? ORDER BY timestamp ASC`,
+      args: [user, user, user, after]
     });
 
     if (result.rows.length === 0) {
       return new NextResponse(null, { status: 204 }); // 204 No Content
     }
 
-    // Update status to 'delivered' for received messages
     await db.execute({
-      sql: `UPDATE messages SET status = 'delivered' WHERE receiver = ? AND status = 'sent' AND timestamp > ?`,
+      sql: `UPDATE messages SET status = 'delivered' 
+            WHERE receiver = ? AND status = 'sent' AND timestamp > ?`,
       args: [user, after]
-    });
+    }).catch(() => {});
 
     return NextResponse.json(result.rows);
   } catch (error) {

@@ -4,7 +4,7 @@ import {
   Search, MoreVertical, MessageSquare, Paperclip, 
   Smile, Mic, Send, Check, CheckCheck, User, 
   Phone, Video, ArrowLeft, Camera, Save, Trash2,
-  PlusIcon
+  Plus, Shield, ShieldAlert, UserMinus, UserPlus, LogOut
 } from 'lucide-react';
 
 export default function WhatsAppClone() {
@@ -21,6 +21,8 @@ export default function WhatsAppClone() {
   
   const [newChatPrompt, setNewChatPrompt] = useState(false);
   const [newChatError, setNewChatError] = useState('');
+  const [newChatTargets, setNewChatTargets] = useState('');
+  const [groupSubject, setGroupSubject] = useState('');
   
   const [showMenu, setShowMenu] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
@@ -28,11 +30,16 @@ export default function WhatsAppClone() {
   const emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥸','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🫣','🤭','🫢','🤫','🤥','😶','🫠','😐','🫤','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','💀','☠️','👻','👽','🤖','💩','🔥','✨','⭐','🌟','💯','❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','👍','👎','👏','🙌','👌','✌️','🤞','🤟','🤘','👋','🤝','🙏','💪','👀','🎉','🎊','🎁','🏆','🥇','🚀','🌈','⚡','☀️','🌙','⭐','🍕','🍔','🍟','🍎','🍉','🍇','🍓','☕','🍺','⚽','🏀','🎮','🎧','📱','💻','⌚','📷','🎥','🚗','✈️','🚆','🏠','🌍'];
   
   const [showProfile, setShowProfile] = useState(false);
-  const [showContactInfo, setShowContactInfo] = useState(false); // NEW: Contact Info Drawer State
+  const [showContactInfo, setShowContactInfo] = useState(false); 
   const [userProfile, setUserProfile] = useState({ displayName: '', photo: '' });
   const [editName, setEditName] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const fileInputRef = useRef(null);
+  
+  const [editGroupName, setEditGroupName] = useState('');
+  const groupPhotoRef = useRef(null);
+  const [showAddParticipant, setShowAddParticipant] = useState(false);
+  const [newParticipant, setNewParticipant] = useState('');
 
   const [contactProfiles, setContactProfiles] = useState({});
   const fetchingProfiles = useRef(new Set());
@@ -53,6 +60,32 @@ export default function WhatsAppClone() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, activeChat]);
 
+  // --- MARK MESSAGES AS READ ---
+  useEffect(() => {
+    if (!activeChat || !currentUser || messages.length === 0) return;
+
+    // Find unread messages in the active chat where we are the receiver
+    const unreadMsgs = messages.filter(m =>
+      m.sender !== currentUser &&
+      m.status !== 'read' &&
+      (activeChat.startsWith('#group_') ? m.receiver === activeChat : m.sender === activeChat)
+    );
+
+    if (unreadMsgs.length > 0) {
+      // Optimistically mark as read in local state
+      setMessages(prev => prev.map(m =>
+        unreadMsgs.find(u => u.id === m.id) ? { ...m, status: 'read' } : m
+      ));
+
+      // Update database
+      fetch('/api/messages', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentUser, activeChat })
+      }).catch(err => console.error("Failed to mark messages as read", err));
+    }
+  }, [activeChat, messages, currentUser]);
+
   // Check if a user is online (pinged within the last 15 seconds)
   const isOnline = (lastSeen) => {
     if (!lastSeen) return false;
@@ -61,8 +94,8 @@ export default function WhatsAppClone() {
 
   useEffect(() => {
     if (isLogged) {
-      fetch(`/api/profile?username=${currentUser}`)
-        .then(res => res.json())
+      fetch(`/api/profile?username=${encodeURIComponent(currentUser)}`)
+        .then(res => { if (!res.ok) throw new Error('API Error'); return res.json(); })
         .then(data => {
           setUserProfile({
             displayName: data.display_name || currentUser,
@@ -115,20 +148,17 @@ export default function WhatsAppClone() {
     lastSyncRef.current = 0; 
   };
 
-  // --- HTTP POLLING ENGINE ---
   useEffect(() => {
     if (!isLogged) return;
     let isMounted = true;
 
     const poll = async () => {
       try {
-        // Ping the server to get messages and update our own last_seen
-        const res = await fetch(`/api/sync?user=${currentUser}&after=${lastSyncRef.current}`);
+        const res = await fetch(`/api/sync?user=${encodeURIComponent(currentUser)}&after=${lastSyncRef.current}`);
         
-        // Fetch active chat's profile in the background to update their online status live
         if (activeChat && isMounted) {
-            fetch(`/api/profile?username=${activeChat}`)
-              .then(r => r.json())
+            fetch(`/api/profile?username=${encodeURIComponent(activeChat)}`)
+              .then(r => { if (!r.ok) throw new Error('API Error'); return r.json(); })
               .then(data => {
                   if (isMounted) {
                       setContactProfiles(prev => ({
@@ -137,7 +167,9 @@ export default function WhatsAppClone() {
                               displayName: data.display_name || activeChat,
                               photo: data.profile_photo || '',
                               contact: data.contact || '',
-                              lastSeen: data.last_seen || 0
+                              lastSeen: data.last_seen || 0,
+                              isGroup: data.isGroup || false,
+                              groupMembers: data.groupMembers || []
                           }
                       }));
                   }
@@ -145,6 +177,7 @@ export default function WhatsAppClone() {
         }
 
         if (!isMounted || res.status === 204) return;
+        if (!res.ok) throw new Error('Sync API Error');
 
         const newMsgs = await res.json();
         if (newMsgs && newMsgs.length > 0) {
@@ -277,7 +310,7 @@ export default function WhatsAppClone() {
           media: media
         })
       });
-      
+      if (!res.ok) throw new Error("Send failed");
       const savedMsg = await res.json();
       setMessages(prev => prev.map(m => m.id === optimisticMsg.id ? savedMsg : m));
     } catch (error) {
@@ -287,11 +320,24 @@ export default function WhatsAppClone() {
 
   const conversations = React.useMemo(() => {
     const chatMap = new Map();
+
     messages.forEach(msg => {
-      const contact = msg.sender === currentUser ? msg.receiver : msg.sender;
+      const contact = msg.receiver.startsWith('#group_') 
+        ? msg.receiver 
+        : (msg.sender === currentUser ? msg.receiver : msg.sender);
+        
+      const isUnread = msg.sender !== currentUser && msg.status !== 'read';
       const existing = chatMap.get(contact);
-      if (!existing || msg.timestamp > existing.timestamp) {
-        chatMap.set(contact, { ...msg });
+
+      if (!existing) {
+        chatMap.set(contact, { ...msg, unreadCount: isUnread ? 1 : 0 });
+      } else {
+        const updatedUnreadCount = existing.unreadCount + (isUnread ? 1 : 0);
+        if (msg.timestamp > existing.timestamp) {
+          chatMap.set(contact, { ...msg, unreadCount: updatedUnreadCount });
+        } else {
+          chatMap.set(contact, { ...existing, unreadCount: updatedUnreadCount });
+        }
       }
     });
 
@@ -305,24 +351,41 @@ export default function WhatsAppClone() {
         lastMessage: preview,
         timestamp: msg.timestamp,
         isMyLast: msg.sender === currentUser,
-        status: msg.status
+        status: msg.status,
+        unreadCount: msg.unreadCount
       };
     });
 
     chatList.sort((a, b) => b.timestamp - a.timestamp);
     if (searchQuery) {
-      chatList = chatList.filter(c => c.contact.toLowerCase().includes(searchQuery.toLowerCase()));
+      chatList = chatList.filter(c => {
+          const profileName = contactProfiles[c.contact]?.displayName?.toLowerCase() || '';
+          const contactId = c.contact.toLowerCase();
+          return profileName.includes(searchQuery.toLowerCase()) || contactId.includes(searchQuery.toLowerCase());
+      });
     }
     return chatList;
-  }, [messages, currentUser, searchQuery]);
+  }, [messages, currentUser, searchQuery, contactProfiles]);
 
   const activeChatMessages = React.useMemo(() => {
     if (!activeChat) return [];
-    return messages.filter(m => 
-      (m.sender === currentUser && m.receiver === activeChat) ||
-      (m.sender === activeChat && m.receiver === currentUser)
-    );
+    return messages.filter(m => {
+      if (activeChat.startsWith('#group_')) {
+        return m.receiver === activeChat;
+      }
+      return (m.sender === currentUser && m.receiver === activeChat) ||
+             (m.sender === activeChat && m.receiver === currentUser);
+    });
   }, [messages, activeChat, currentUser]);
+
+  const knownContacts = React.useMemo(() => {
+    const contacts = new Set();
+    messages.forEach(msg => {
+      if (msg.sender !== currentUser && !msg.sender.startsWith('#group_')) contacts.add(msg.sender);
+      if (msg.receiver !== currentUser && !msg.receiver.startsWith('#group_')) contacts.add(msg.receiver);
+    });
+    return Array.from(contacts);
+  }, [messages, currentUser]);
 
   useEffect(() => {
     if (!isLogged) return;
@@ -331,8 +394,8 @@ export default function WhatsAppClone() {
       if (!contact || contactProfiles[contact] || fetchingProfiles.current.has(contact)) return;
       
       fetchingProfiles.current.add(contact);
-      fetch(`/api/profile?username=${contact}`)
-        .then(res => res.json())
+      fetch(`/api/profile?username=${encodeURIComponent(contact)}`)
+        .then(res => { if (!res.ok) throw new Error('API Error'); return res.json(); })
         .then(data => {
           setContactProfiles(prev => ({
             ...prev,
@@ -340,7 +403,9 @@ export default function WhatsAppClone() {
               displayName: data.display_name || contact,
               photo: data.profile_photo || '',
               contact: data.contact || '',
-              lastSeen: data.last_seen || 0
+              lastSeen: data.last_seen || 0,
+              isGroup: data.isGroup || false,
+              groupMembers: data.groupMembers || []
             }
           }));
         })
@@ -351,6 +416,144 @@ export default function WhatsAppClone() {
       conversations.forEach(c => fetchContactProfile(c.contact));
     }
   }, [conversations, isLogged]);
+
+  const handleSuggestionClick = (suggestion) => {
+     const parts = newChatTargets.split(',');
+     parts.pop(); 
+     parts.push(suggestion);
+     setNewChatTargets(parts.join(', ') + ', ');
+  };
+
+  const handleNewChat = async (e) => {
+    e.preventDefault();
+    setNewChatError('');
+    
+    const targets = newChatTargets.split(',').map(s => s.trim().toLowerCase()).filter(s => s && s !== currentUser);
+    if (targets.length === 0) return;
+
+    if (targets.length === 1) {
+      try {
+        const res = await fetch(`/api/profile?username=${encodeURIComponent(targets[0])}`);
+        if (!res.ok) throw new Error("Not found");
+        const data = await res.json();
+        
+        if (data.username) {
+          setActiveChat(targets[0]);
+          setShowContactInfo(false);
+          setNewChatPrompt(false);
+          setNewChatTargets('');
+        } else {
+          setNewChatError('User not found. Check the username.');
+        }
+      } catch (err) {
+        setNewChatError('Error verifying user.');
+      }
+    } else {
+      try {
+        const res = await fetch('/api/groups', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: groupSubject.trim() || `${userProfile.displayName || currentUser}'s Group`,
+            createdBy: currentUser,
+            members: [currentUser, ...targets]
+          })
+        });
+        if (!res.ok) throw new Error("Group error");
+        const data = await res.json();
+        if (data.id) {
+          setActiveChat(data.id);
+          setShowContactInfo(false);
+          setNewChatPrompt(false);
+          setNewChatTargets('');
+          setGroupSubject('');
+        } else {
+          setNewChatError('Failed to create group.');
+        }
+      } catch (err) {
+        setNewChatError('Failed to create group.');
+      }
+    }
+  };
+
+  const handleDeleteChat = async () => {
+    if (activeChat.startsWith('#group_')) {
+      await fetch(`/api/groups/members?groupId=${encodeURIComponent(activeChat)}&username=${encodeURIComponent(currentUser)}&actionBy=${encodeURIComponent(currentUser)}`, { method: 'DELETE' });
+      setMessages(prev => prev.filter(m => m.receiver !== activeChat));
+    } else {
+      await fetch('/api/messages', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user1: currentUser, user2: activeChat })
+      });
+      setMessages(prev => prev.filter(m => !(
+        (m.sender === currentUser && m.receiver === activeChat) ||
+        (m.sender === activeChat && m.receiver === currentUser)
+      )));
+    }
+    setActiveChat(null);
+    setShowContactInfo(false);
+  };
+
+  const handleGroupAction = async (targetUser, action) => {
+    if (action === 'remove') {
+       await fetch(`/api/groups/members?groupId=${encodeURIComponent(activeChat)}&username=${encodeURIComponent(targetUser)}&actionBy=${encodeURIComponent(currentUser)}`, { method: 'DELETE' });
+    } else {
+       await fetch('/api/groups/members', {
+         method: 'PUT',
+         headers: {'Content-Type': 'application/json'},
+         body: JSON.stringify({ groupId: activeChat, username: targetUser, role: action, updatedBy: currentUser })
+       });
+    }
+    fetchingProfiles.current.delete(activeChat); 
+  };
+
+  const handleAddParticipant = async (e) => {
+    e.preventDefault();
+    if (!newParticipant.trim()) return;
+    await fetch('/api/groups/members', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groupId: activeChat, username: newParticipant.trim(), addedBy: currentUser })
+    });
+    setNewParticipant('');
+    setShowAddParticipant(false);
+    fetchingProfiles.current.delete(activeChat);
+  };
+
+  const handleGroupPhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64String = reader.result;
+        await fetch('/api/groups', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ groupId: activeChat, profile_photo: base64String, updatedBy: currentUser })
+        });
+        setContactProfiles(prev => ({
+          ...prev,
+          [activeChat]: { ...prev[activeChat], photo: base64String }
+        }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const saveGroupName = async () => {
+    if (!editGroupName.trim()) return;
+    await fetch('/api/groups', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groupId: activeChat, name: editGroupName, updatedBy: currentUser })
+    });
+    setContactProfiles(prev => ({
+      ...prev,
+      [activeChat]: { ...prev[activeChat], displayName: editGroupName }
+    }));
+    setEditGroupName('');
+  };
 
   if (!isLogged) {
     const handleAuth = async (e) => {
@@ -482,6 +685,16 @@ export default function WhatsAppClone() {
     );
   }
 
+  const activeProfile = activeChat ? contactProfiles[activeChat] : null;
+  const isGroup = activeChat?.startsWith('#group_');
+  const myRole = isGroup ? activeProfile?.groupMembers?.find(m => m.username === currentUser)?.role : null;
+  const isAdmin = myRole === 'admin';
+  
+  const currentTypingWord = newChatTargets.split(',').pop().trim();
+  const suggestions = currentTypingWord 
+    ? knownContacts.filter(c => c.toLowerCase().includes(currentTypingWord.toLowerCase()) && c !== currentUser)
+    : [];
+
   return (
     <div className="flex h-screen w-full bg-[#d1d7db] font-sans overflow-hidden">
       <div className="flex w-full h-full max-w-[1600px] mx-auto md:py-4 md:px-4 shadow-xl">
@@ -582,7 +795,7 @@ export default function WhatsAppClone() {
                   }} 
                   className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors"
                 >
-                  < PlusIcon size={20} />
+                  <Plus size={20} />
                 </button>
                 <div className="relative">
                   <button onClick={() => setShowMenu(!showMenu)} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors">
@@ -598,37 +811,49 @@ export default function WhatsAppClone() {
               </div>
             </div>
 
+            {}
+            {/* NEW CHAT / GROUP CHAT CREATION UI */}
             {newChatPrompt && (
-              <div className="bg-white p-3 border-b border-[#e9edef]">
-                 <form onSubmit={async (e) => { 
-                    e.preventDefault(); 
-                    setNewChatError('');
-                    
-                    const target = e.target.elements.contact.value.toLowerCase().trim();
-                    if(!target || target === currentUser) return;
-                    
-                    try {
-                      const res = await fetch(`/api/profile?username=${target}`);
-                      const data = await res.json();
-                      
-                      if (data.username) {
-                        setActiveChat(target);
-                        setShowContactInfo(false); // Reset right drawer on new chat
-                        setNewChatPrompt(false);
-                        e.target.reset();
-                      } else {
-                        setNewChatError('User not found. Check the username.');
-                      }
-                    } catch (err) {
-                      setNewChatError('Error verifying user.');
-                    }
-                 }} className="flex flex-col gap-2">
+              <div className="bg-white p-3 border-b border-[#e9edef] relative z-20">
+                 <form onSubmit={handleNewChat} className="flex flex-col gap-2">
                     <div className="flex gap-2">
-                      <input name="contact" placeholder="Enter username..." className="flex-1 bg-[#f0f2f5] text-[#41525d] px-3 py-2 rounded-lg text-sm focus:outline-none" autoFocus />
+                      <input 
+                        name="contact" 
+                        value={newChatTargets}
+                        onChange={e => setNewChatTargets(e.target.value)}
+                        placeholder="Names (comma separated for groups)" 
+                        className="flex-1 bg-[#f0f2f5] text-[#41525d] px-3 py-2 rounded-lg text-sm focus:outline-none" 
+                        autoFocus 
+                      />
                       <button type="submit" className="bg-[#00a884] text-white px-4 py-2 rounded-lg text-sm font-medium">Chat</button>
                     </div>
+                    {newChatTargets.includes(',') && (
+                       <div className="mt-1">
+                          <input 
+                            name="subject" 
+                            value={groupSubject}
+                            onChange={e => setGroupSubject(e.target.value)}
+                            placeholder="Group Subject (Optional)" 
+                            className="w-full bg-[#f0f2f5] text-[#41525d] px-3 py-2 rounded-lg text-sm focus:outline-none" 
+                          />
+                       </div>
+                    )}
                     {newChatError && <span className="text-red-500 text-xs ml-1 font-medium">{newChatError}</span>}
                  </form>
+                 
+                 {suggestions.length > 0 && (
+                   <div className="absolute top-[50px] left-3 right-3 bg-white border border-[#e9edef] shadow-lg rounded-lg max-h-48 overflow-y-auto">
+                     {suggestions.map(s => (
+                       <div 
+                         key={s} 
+                         onClick={() => handleSuggestionClick(s)}
+                         className="px-4 py-2 hover:bg-[#f5f6f6] cursor-pointer text-sm text-[#111b21] flex items-center gap-2"
+                       >
+                         <User size={16} className="text-[#8696a0]"/> {s}
+                       </div>
+                     ))}
+                   </div>
+                 )}
               </div>
             )}
 
@@ -648,7 +873,7 @@ export default function WhatsAppClone() {
             <div className="flex-1 overflow-y-auto bg-white">
               {conversations.length === 0 ? (
                 <div className="text-center p-6 text-[#54656f] text-sm">
-                  No conversations yet. Click the message icon to start a chat.
+                  No conversations yet. Click the + icon to start a chat.
                 </div>
               ) : (
                 conversations.map((chat) => (
@@ -661,28 +886,39 @@ export default function WhatsAppClone() {
                       {contactProfiles[chat.contact]?.photo ? (
                         <img src={contactProfiles[chat.contact].photo} alt="Profile" className="w-full h-full object-cover" />
                       ) : (
-                        <span className="font-semibold text-lg text-[#a6b0b5]">{chat.contact.charAt(0).toUpperCase()}</span>
+                        <span className="font-semibold text-lg text-[#a6b0b5]">
+                          {contactProfiles[chat.contact]?.displayName ? contactProfiles[chat.contact].displayName.charAt(0).toUpperCase() : chat.contact.charAt(0).toUpperCase()}
+                        </span>
                       )}
                     </div>
                     <div className="flex-1 min-w-0 border-b border-[#f2f2f2] pb-2 pt-1">
                       <div className="flex justify-between items-baseline mb-0.5">
                         <span className="font-normal text-base text-[#111b21] truncate flex items-center gap-1.5">
                           {contactProfiles[chat.contact]?.displayName || chat.contact}
-                          {isOnline(contactProfiles[chat.contact]?.lastSeen) && (
+                          {!chat.contact.startsWith('#group_') && isOnline(contactProfiles[chat.contact]?.lastSeen) && (
                             <span className="w-2 h-2 bg-[#25D366] rounded-full shadow-sm"></span>
                           )}
                         </span>
-                        <span className="text-xs text-[#667781]">
+                        <span className={`text-xs ${chat.unreadCount > 0 ? 'text-[#25D366] font-medium' : 'text-[#667781]'}`}>
                           {new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
-                      <div className="flex items-center text-sm text-[#667781]">
-                        {chat.isMyLast && (
-                           <span className="mr-1">
-                             {chat.status === 'sent' ? <Check size={14} className="text-[#8696a0]" /> : <CheckCheck size={14} className="text-[#53bdeb]" />}
-                           </span>
+                      <div className="flex items-center justify-between text-sm text-[#667781] w-full">
+                        <div className="flex items-center truncate">
+                          {chat.isMyLast && (
+                             <span className="mr-1 flex-shrink-0">
+                               {chat.status === 'read' ? <CheckCheck size={14} className="text-[#53bdeb]" /> : 
+                                chat.status === 'delivered' ? <CheckCheck size={14} className="text-[#8696a0]" /> : 
+                                <Check size={14} className="text-[#8696a0]" />}
+                             </span>
+                          )}
+                          <span className="truncate">{chat.lastMessage}</span>
+                        </div>
+                        {chat.unreadCount > 0 && (
+                          <div className="bg-[#25D366] text-white text-[11px] font-bold px-1.5 py-0.5 min-w-[20px] h-[20px] rounded-full flex items-center justify-center shadow-sm ml-2 flex-shrink-0">
+                            {chat.unreadCount}
+                          </div>
                         )}
-                        <span className="truncate">{chat.lastMessage}</span>
                       </div>
                     </div>
                   </div>
@@ -691,8 +927,6 @@ export default function WhatsAppClone() {
             </div>
           </div>
 
-          {}
-          {/* RIGHT CHAT AREA */}
           <div className={`flex-col flex-1 bg-[#efeae2] relative overflow-hidden ${!activeChat ? 'hidden md:flex' : 'flex'}`}>
             {!activeChat ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-[#f0f2f5] border-l border-[#e9edef]">
@@ -704,14 +938,12 @@ export default function WhatsAppClone() {
               </div>
             ) : (
               <>
-                {/* ACTIVE CHAT HEADER */}
                 <div className="h-[60px] bg-[#f0f2f5] flex items-center justify-between px-4 z-10 sticky top-0 border-l border-[#e9edef]">
                   <div className="flex items-center gap-1">
                     <button className="md:hidden text-[#54656f] mr-1" onClick={() => setActiveChat(null)}>
                       <ArrowLeft size={24} />
                     </button>
                     
-                    {/* Clickable Profile Area */}
                     <div 
                       className="flex items-center gap-3 cursor-pointer hover:bg-black/5 p-1 rounded-lg transition-colors" 
                       onClick={() => setShowContactInfo(true)}
@@ -720,7 +952,9 @@ export default function WhatsAppClone() {
                         {contactProfiles[activeChat]?.photo ? (
                           <img src={contactProfiles[activeChat].photo} alt="Profile" className="w-full h-full object-cover" />
                         ) : (
-                          <span className="font-semibold text-[#a6b0b5]">{activeChat.charAt(0).toUpperCase()}</span>
+                          <span className="font-semibold text-[#a6b0b5]">
+                            {contactProfiles[activeChat]?.displayName ? contactProfiles[activeChat].displayName.charAt(0).toUpperCase() : activeChat.charAt(0).toUpperCase()}
+                          </span>
                         )}
                       </div>
                       <div>
@@ -728,12 +962,12 @@ export default function WhatsAppClone() {
                           <h2 className="font-normal text-[#111b21]">
                             {contactProfiles[activeChat]?.displayName || activeChat}
                           </h2>
-                          {isOnline(contactProfiles[activeChat]?.lastSeen) && (
+                          {!isGroup && isOnline(contactProfiles[activeChat]?.lastSeen) && (
                             <div className="w-2.5 h-2.5 bg-[#25D366] rounded-full shadow-sm border border-[#f0f2f5]"></div>
                           )}
                         </div>
                         <p className="text-xs text-[#667781] mt-0.5">
-                           {isOnline(contactProfiles[activeChat]?.lastSeen) ? 'Online' : 'Offline'}
+                           {isGroup ? 'Group Chat' : (isOnline(contactProfiles[activeChat]?.lastSeen) ? 'Online' : 'Offline')}
                         </p>
                       </div>
                     </div>
@@ -745,7 +979,7 @@ export default function WhatsAppClone() {
                   </div>
                 </div>
 
-                {/* CHAT MESSAGES */}
+                {}
                 <div 
                   className="flex-1 overflow-y-auto p-4 md:px-[6%] lg:px-[9%] py-6 z-0" 
                   style={{
@@ -759,6 +993,16 @@ export default function WhatsAppClone() {
                     const isMe = msg.sender === currentUser;
                     const isFirstInGroup = i === 0 || activeChatMessages[i-1].sender !== msg.sender;
 
+                    if (msg.type === 'system') {
+                      return (
+                        <div key={msg.id} className="flex justify-center my-2 w-full">
+                           <div className="bg-[#fff5c4] text-[#54656f] text-xs px-3 py-1.5 rounded-lg shadow-sm font-medium text-center max-w-[85%]">
+                             {msg.text}
+                           </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-1`}>
                         <div className={`relative max-w-[85%] md:max-w-[70%] rounded-lg px-2.5 pt-1.5 pb-2 shadow-sm
@@ -768,6 +1012,9 @@ export default function WhatsAppClone() {
                           ${isFirstInGroup ? 'mt-2' : ''}
                         `}>
                           <div className="flex flex-col">
+                            {isGroup && !isMe && isFirstInGroup && (
+                              <span className="text-xs font-bold text-[#e57373] mb-1">{msg.sender}</span>
+                            )}
                             
                             {msg.type === 'image' && msg.media && (
                               <img src={msg.media} alt="attachment" className="max-w-[250px] md:max-w-[300px] rounded-md mb-1 cursor-pointer object-cover" />
@@ -799,8 +1046,9 @@ export default function WhatsAppClone() {
                                </span>
                                {isMe && (
                                  <span className="pt-1">
-                                   {msg.status === 'sent' && <Check size={13} className="text-[#667781]" />}
-                                   {msg.status === 'delivered' && <CheckCheck size={13} className="text-[#53bdeb]" />}
+                                   {msg.status === 'read' ? <CheckCheck size={13} className="text-[#53bdeb]" /> : 
+                                    msg.status === 'delivered' ? <CheckCheck size={13} className="text-[#8696a0]" /> : 
+                                    <Check size={13} className="text-[#667781]" />}
                                  </span>
                                )}
                             </div>
@@ -812,7 +1060,6 @@ export default function WhatsAppClone() {
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* INPUT BAR */}
                 <div className="min-h-[62px] bg-[#f0f2f5] px-4 py-2 flex items-end gap-3 z-10 border-l border-[#e9edef] relative">
                   
                   {showEmojis && (
@@ -882,34 +1129,111 @@ export default function WhatsAppClone() {
                   </div>
                 </div>
                 
-                {/* CONTACT INFO DRAWER (OVERLAY ON RIGHT) */}
+                {}
                 <div className={`absolute top-0 right-0 h-full w-full md:w-[350px] lg:w-[400px] bg-[#f0f2f5] z-50 transition-transform duration-300 ease-in-out border-l border-[#e9edef] shadow-2xl flex flex-col ${showContactInfo ? 'translate-x-0' : 'translate-x-full'}`}>
                   <div className="h-[60px] bg-[#f0f2f5] flex items-center px-6 text-[#54656f] gap-6 shrink-0 border-b border-[#e9edef]">
                     <button onClick={() => setShowContactInfo(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors">
                       <ArrowLeft size={24} />
                     </button>
-                    <h1 className="text-[16px] font-medium text-[#111b21]">Contact info</h1>
+                    <h1 className="text-[16px] font-medium text-[#111b21]">{isGroup ? 'Group info' : 'Contact info'}</h1>
                   </div>
                   
-                  <div className="flex-1 overflow-y-auto">
-                    <div className="bg-white flex flex-col items-center py-8 shadow-sm mb-2 px-4 text-center">
-                      <div className="w-48 h-48 rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center text-white mb-4 shadow-md">
-                        {contactProfiles[activeChat]?.photo ? (
-                          <img src={contactProfiles[activeChat].photo} alt="Profile" className="w-full h-full object-cover" />
+                  <div className="flex-1 overflow-y-auto pb-8">
+                    <div className="bg-white flex flex-col items-center py-8 shadow-sm mb-2 px-4 text-center relative group">
+                      <div className="w-48 h-48 rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center text-white mb-4 shadow-md relative">
+                        {activeProfile?.photo ? (
+                          <img src={activeProfile.photo} alt="Profile" className="w-full h-full object-cover" />
                         ) : (
                           <User size={80} className="text-[#a6b0b5]" />
                         )}
+                        {isAdmin && (
+                          <div className="absolute inset-0 bg-black/50 hidden group-hover:flex flex-col items-center justify-center cursor-pointer transition-all" onClick={() => groupPhotoRef.current?.click()}>
+                            <Camera size={32} />
+                            <span className="text-sm mt-1">Change</span>
+                          </div>
+                        )}
                       </div>
-                      <h2 className="text-2xl font-normal text-[#111b21] mb-1">
-                        {contactProfiles[activeChat]?.displayName || activeChat}
-                      </h2>
-                      <p className="text-[#667781] text-lg">{contactProfiles[activeChat]?.contact || '~'}</p>
+                      <input type="file" ref={groupPhotoRef} className="hidden" accept="image/*" onChange={handleGroupPhotoUpload} />
+                      
+                      <div className="flex items-center gap-2">
+                        <input 
+                          value={editGroupName !== '' ? editGroupName : (activeProfile?.displayName || activeChat)}
+                          onChange={e => setEditGroupName(e.target.value)}
+                          disabled={!isAdmin}
+                          className={`text-2xl font-normal text-[#111b21] mb-1 text-center bg-transparent ${isAdmin ? 'border-b border-[#00a884] focus:outline-none' : ''}`}
+                        />
+                        {isAdmin && editGroupName && (
+                          <button onClick={saveGroupName} className="text-[#00a884] hover:bg-gray-100 p-1 rounded-full"><Check size={20}/></button>
+                        )}
+                      </div>
+                      <p className="text-[#667781] text-lg">{isGroup ? `Group · ${activeProfile?.groupMembers?.length || 0} participants` : (activeProfile?.contact || '~')}</p>
                     </div>
 
-                    <div className="bg-white px-6 py-4 shadow-sm mb-2">
-                        <p className="text-[#667781] text-sm mb-2">About and phone number</p>
-                        <p className="text-[#111b21] text-base">{contactProfiles[activeChat]?.contact || 'No contact info provided.'}</p>
-                    </div>
+                    {!isGroup && (
+                      <div className="bg-white px-6 py-4 shadow-sm mb-2">
+                          <p className="text-[#667781] text-sm mb-2">About and phone number</p>
+                          <p className="text-[#111b21] text-base">{activeProfile?.contact || 'No contact info provided.'}</p>
+                      </div>
+                    )}
+
+                    {isGroup && (
+                      <div className="bg-white shadow-sm mb-2 pt-4 pb-2">
+                        <div className="flex items-center justify-between px-6 mb-3">
+                           <p className="text-[#667781] text-sm font-medium">{activeProfile?.groupMembers?.length || 0} participants</p>
+                           {isAdmin && (
+                             <button onClick={() => setShowAddParticipant(!showAddParticipant)} className="text-[#00a884] text-sm font-medium flex items-center gap-1 hover:underline">
+                               <UserPlus size={16}/> Add
+                             </button>
+                           )}
+                        </div>
+
+                        {showAddParticipant && isAdmin && (
+                          <form onSubmit={handleAddParticipant} className="px-6 mb-4 flex gap-2">
+                             <input 
+                               value={newParticipant} 
+                               onChange={e => setNewParticipant(e.target.value)} 
+                               placeholder="Username" 
+                               className="flex-1 bg-[#f0f2f5] px-3 py-2 rounded-lg text-sm focus:outline-none"
+                             />
+                             <button type="submit" className="bg-[#00a884] text-white px-3 py-2 rounded-lg text-sm font-medium">Add</button>
+                          </form>
+                        )}
+
+                        {activeProfile?.groupMembers?.map(member => (
+                          <div key={member.username} className="flex items-center justify-between px-6 py-3 hover:bg-[#f5f6f6] transition-colors group">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-[#dfe5e7] rounded-full overflow-hidden">
+                                {member.profile_photo ? (
+                                  <img src={member.profile_photo} alt="P" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-white bg-[#a6b0b5] font-medium uppercase">{member.display_name?.charAt(0) || member.username.charAt(0)}</div>
+                                )}
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="text-[#111b21]">{member.username === currentUser ? 'You' : (member.display_name || member.username)}</span>
+                                {member.role === 'admin' && <span className="text-xs text-[#00a884] border border-[#00a884] rounded px-1 w-fit mt-0.5">Admin</span>}
+                              </div>
+                            </div>
+                            
+                            {isAdmin && member.username !== currentUser && (
+                              <div className="hidden group-hover:flex gap-2">
+                                {member.role !== 'admin' ? (
+                                  <button onClick={() => handleGroupAction(member.username, 'admin')} title="Make Admin" className="p-1.5 text-gray-500 hover:text-[#00a884] bg-gray-100 rounded-full"><Shield size={16} /></button>
+                                ) : (
+                                  <button onClick={() => handleGroupAction(member.username, 'member')} title="Remove Admin" className="p-1.5 text-gray-500 hover:text-orange-500 bg-gray-100 rounded-full"><ShieldAlert size={16} /></button>
+                                )}
+                                <button onClick={() => handleGroupAction(member.username, 'remove')} title="Remove User" className="p-1.5 text-gray-500 hover:text-red-500 bg-gray-100 rounded-full"><UserMinus size={16} /></button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <button onClick={handleDeleteChat} className="text-[#ea0038] hover:bg-[#f5f6f6] flex items-center gap-4 w-full px-6 py-4 bg-white shadow-sm mt-4 transition-colors font-medium">
+                      <LogOut size={20} className="text-[#ea0038]" />
+                      {isGroup ? 'Exit Group' : 'Delete Chat'}
+                    </button>
                   </div>
                 </div>
 
