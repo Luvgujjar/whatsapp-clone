@@ -4,7 +4,8 @@ import {
   Search, MoreVertical, MessageSquare, Paperclip, 
   Smile, Mic, Send, Check, CheckCheck, User, 
   Phone, Video, ArrowLeft, Camera, Save, Trash2,
-  Plus, Shield, ShieldAlert, UserMinus, UserPlus, LogOut
+  Plus, Shield, ShieldAlert, UserMinus, UserPlus, LogOut,
+  CircleDashed, X, Settings, Eye, ChevronUp, ChevronDown
 } from 'lucide-react';
 
 export default function WhatsAppClone() {
@@ -19,21 +20,39 @@ export default function WhatsAppClone() {
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Tab Management
+  const [activeTab, setActiveTab] = useState('chats');
+  const [statuses, setStatuses] = useState([]);
+  const [viewingStatusUser, setViewingStatusUser] = useState(null);
+  const [viewingStatusIndex, setViewingStatusIndex] = useState(0);
+  const [statusProgress, setStatusProgress] = useState(0);
+  const statusUploadRef = useRef(null);
+  const [isUploadingStatus, setIsUploadingStatus] = useState(false);
+  const [statusError, setStatusError] = useState('');
+
+  // Status Views & Privacy
+  const [showStatusPrivacy, setShowStatusPrivacy] = useState(false);
+  const [hiddenUsers, setHiddenUsers] = useState([]);
+  const [statusViewers, setStatusViewers] = useState([]);
+  const [showViewersList, setShowViewersList] = useState(false);
+
+  // Group Creation
   const [newChatPrompt, setNewChatPrompt] = useState(false);
   const [newChatError, setNewChatError] = useState('');
   const [newChatTargets, setNewChatTargets] = useState('');
   const [groupSubject, setGroupSubject] = useState('');
   
+  // UI States
   const [showMenu, setShowMenu] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const attachmentRef = useRef(null);
   const emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥸','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🫣','🤭','🫢','🤫','🤥','😶','🫠','😐','🫤','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','💀','☠️','👻','👽','🤖','💩','🔥','✨','⭐','🌟','💯','❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','👍','👎','👏','🙌','👌','✌️','🤞','🤟','🤘','👋','🤝','🙏','💪','👀','🎉','🎊','🎁','🏆','🥇','🚀','🌈','⚡','☀️','🌙','⭐','🍕','🍔','🍟','🍎','🍉','🍇','🍓','☕','🍺','⚽','🏀','🎮','🎧','📱','💻','⌚','📷','🎥','🚗','✈️','🚆','🏠','🌍'];
   
+  // Profile & Contact Info
   const [showProfile, setShowProfile] = useState(false);
   const [showContactInfo, setShowContactInfo] = useState(false); 
   const [userProfile, setUserProfile] = useState({ displayName: '', photo: '' });
   const [editName, setEditName] = useState('');
-  const [newPassword, setNewPassword] = useState('');
   const fileInputRef = useRef(null);
   
   const [editGroupName, setEditGroupName] = useState('');
@@ -44,7 +63,7 @@ export default function WhatsAppClone() {
   const [contactProfiles, setContactProfiles] = useState({});
   const fetchingProfiles = useRef(new Set());
 
-  // --- AUDIO RECORDING STATES ---
+  // Audio Recording
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const mediaRecorderRef = useRef(null);
@@ -55,16 +74,89 @@ export default function WhatsAppClone() {
   const lastSyncRef = useRef(0);
   const messagesEndRef = useRef(null);
 
-  // Auto-scroll to bottom of chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, activeChat]);
 
-  // --- MARK MESSAGES AS READ ---
+  // Derived state to group statuses by user
+  const groupedStatuses = React.useMemo(() => {
+    const map = {};
+    statuses.forEach(s => {
+      if (!map[s.username]) map[s.username] = [];
+      map[s.username].push(s);
+    });
+    return map;
+  }, [statuses]);
+
+  useEffect(() => {
+    if (!viewingStatusUser) {
+      setShowViewersList(false);
+      return;
+    }
+    
+    const userStatuses = groupedStatuses[viewingStatusUser] || [];
+    const currentStatus = userStatuses[viewingStatusIndex];
+    
+    if (!currentStatus) return;
+
+    // View Tracking Logic
+    if (viewingStatusUser !== currentUser) {
+       fetch('/api/statuses/views', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ statusId: currentStatus.id, viewer: currentUser })
+       }).catch(()=>{});
+    } else {
+       fetch(`/api/statuses/views?statusId=${currentStatus.id}`)
+         .then(r => r.ok ? r.json() : [])
+         .then(data => setStatusViewers(data || []))
+         .catch(()=>{});
+    }
+
+    // Auto-Advance Timer (Pauses if viewers list is open)
+    if (showViewersList) return;
+
+    const timer = setInterval(() => {
+      setStatusProgress(prev => {
+        if (prev >= 100) {
+           if (viewingStatusIndex < userStatuses.length - 1) {
+             setViewingStatusIndex(idx => idx + 1);
+             return 0; 
+           } else {
+             setViewingStatusUser(null); 
+             return 0;
+           }
+        }
+        return prev + 2; // 5 seconds per status (2% per 100ms)
+      });
+    }, 100);
+    
+    return () => clearInterval(timer);
+  }, [viewingStatusUser, viewingStatusIndex, statuses, showViewersList, groupedStatuses, currentUser]);
+
+  const handlePrevStatus = () => {
+    if (viewingStatusIndex > 0) {
+      setViewingStatusIndex(idx => idx - 1);
+      setStatusProgress(0);
+    } else {
+      setStatusProgress(0);
+    }
+  };
+
+  const handleNextStatus = () => {
+    const userStatuses = groupedStatuses[viewingStatusUser] || [];
+    if (viewingStatusIndex < userStatuses.length - 1) {
+      setViewingStatusIndex(idx => idx + 1);
+      setStatusProgress(0);
+    } else {
+      setViewingStatusUser(null); 
+      setStatusProgress(0);
+    }
+  };
+
   useEffect(() => {
     if (!activeChat || !currentUser || messages.length === 0) return;
 
-    // Find unread messages in the active chat where we are the receiver
     const unreadMsgs = messages.filter(m =>
       m.sender !== currentUser &&
       m.status !== 'read' &&
@@ -72,21 +164,18 @@ export default function WhatsAppClone() {
     );
 
     if (unreadMsgs.length > 0) {
-      // Optimistically mark as read in local state
       setMessages(prev => prev.map(m =>
         unreadMsgs.find(u => u.id === m.id) ? { ...m, status: 'read' } : m
       ));
 
-      // Update database
       fetch('/api/messages', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentUser, activeChat })
-      }).catch(err => console.error("Failed to mark messages as read", err));
+      }).catch(err => console.error(err));
     }
   }, [activeChat, messages, currentUser]);
 
-  // Check if a user is online (pinged within the last 15 seconds)
   const isOnline = (lastSeen) => {
     if (!lastSeen) return false;
     return (Date.now() - lastSeen) < 15000; 
@@ -95,17 +184,108 @@ export default function WhatsAppClone() {
   useEffect(() => {
     if (isLogged) {
       fetch(`/api/profile?username=${encodeURIComponent(currentUser)}`)
-        .then(res => { if (!res.ok) throw new Error('API Error'); return res.json(); })
+        .then(res => { if (!res.ok) throw new Error(); return res.json(); })
         .then(data => {
           setUserProfile({
             displayName: data.display_name || currentUser,
             photo: data.profile_photo || ''
           });
           setEditName(data.display_name || currentUser);
-        })
-        .catch(err => console.error("Failed to load profile", err));
+        }).catch(()=>{});
+
+      fetch(`/api/statuses/privacy?username=${encodeURIComponent(currentUser)}`)
+        .then(r => r.ok ? r.json() : { hiddenUsers: [] })
+        .then(d => setHiddenUsers(d.hiddenUsers || []))
+        .catch(()=>{});
     }
   }, [isLogged, currentUser]);
+
+  const handleLogout = () => {
+    setIsLogged(false);
+    setCurrentUser('');
+    setPassword('');
+    setMessages([]);
+    setActiveChat(null);
+    setShowMenu(false);
+    setShowProfile(false);
+    setShowContactInfo(false);
+    setContactProfiles({});
+    setActiveTab('chats');
+    lastSyncRef.current = 0; 
+  };
+
+  // Main background polling engine
+  useEffect(() => {
+    if (!isLogged) return;
+    let isMounted = true;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/sync?user=${encodeURIComponent(currentUser)}&after=${lastSyncRef.current}`);
+        
+        // Refresh active chat profile silently to detect new members/name changes
+        if (activeChat && isMounted) {
+            fetch(`/api/profile?username=${encodeURIComponent(activeChat)}`)
+              .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); })
+              .then(data => {
+                  if (isMounted && !data.error) {
+                      setContactProfiles(prev => ({
+                          ...prev,
+                          [activeChat]: {
+                              displayName: data.display_name || data.name || activeChat,
+                              photo: data.profile_photo || '',
+                              contact: data.contact || '',
+                              lastSeen: data.last_seen || 0,
+                              isGroup: data.isGroup || false,
+                              groupMembers: data.groupMembers || []
+                          }
+                      }));
+                  }
+              }).catch(() => {});
+        }
+
+        if (isMounted) {
+           fetch(`/api/statuses?viewer=${encodeURIComponent(currentUser)}`)
+            .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+            .then(data => setStatuses(data))
+            .catch(()=>{});
+        }
+
+        if (!res.ok && res.status !== 204) throw new Error('Server error');
+        if (!isMounted || res.status === 204) return;
+
+        const newMsgs = await res.json();
+        if (newMsgs && newMsgs.length > 0) {
+          const maxTimestamp = Math.max(...newMsgs.map(m => m.timestamp));
+          lastSyncRef.current = maxTimestamp;
+          
+          setMessages(prev => {
+            const existingIds = new Set(prev.map(m => m.id));
+            const uniqueNew = newMsgs.filter(m => !existingIds.has(m.id));
+            return [...prev, ...uniqueNew].sort((a, b) => a.timestamp - b.timestamp);
+          });
+        }
+      } catch (err) {}
+    };
+
+    poll();
+    const intervalId = setInterval(poll, 2000);
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [isLogged, currentUser, activeChat]);
+
+  const saveStatusPrivacy = async () => {
+    try {
+      await fetch('/api/statuses/privacy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: currentUser, hiddenUsers })
+      });
+      setShowStatusPrivacy(false);
+    } catch(e) { console.error(e); }
+  };
 
   const handlePhotoUpload = (e) => {
     const file = e.target.files[0];
@@ -120,104 +300,150 @@ export default function WhatsAppClone() {
     }
   };
 
+  const handleStatusUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const maxSize = file.type.startsWith('video/') ? 1 * 1024 * 1024 : 2 * 1024 * 1024; 
+    if (file.size > maxSize) {
+      setStatusError(`File is too large. ${file.type.startsWith('video/') ? 'Videos must be under 1MB.' : 'Images must be under 2MB.'}`);
+      setTimeout(() => setStatusError(''), 5000);
+      e.target.value = '';
+      return;
+    }
+
+    setIsUploadingStatus(true);
+    setStatusError('');
+
+    if (file.type.startsWith('video/')) {
+        const reader = new FileReader();
+        reader.onloadend = async (event) => {
+            const base64 = event.target.result;
+            try {
+              const res = await fetch('/api/statuses', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: currentUser, content: base64, type: 'video' })
+              });
+              if(res.ok) {
+                const data = await res.json();
+                if(data.id) setStatuses(prev => [...prev, data]);
+              } else {
+                const errData = await res.json().catch(()=>({}));
+                setStatusError(`Video Error: ${errData.error || 'Too large for server'}`);
+                setTimeout(() => setStatusError(''), 5000);
+              }
+            } catch(err) {
+              setStatusError('Network error during video upload.');
+              setTimeout(() => setStatusError(''), 4000);
+            } finally {
+              setIsUploadingStatus(false);
+            }
+        };
+        reader.readAsDataURL(file);
+        e.target.value = '';
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = (event) => {
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = document.createElement('canvas');
+        const MAX_DIMENSION = 800;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height && width > MAX_DIMENSION) {
+           height *= MAX_DIMENSION / width;
+           width = MAX_DIMENSION;
+        } else if (height > MAX_DIMENSION) {
+           width *= MAX_DIMENSION / height;
+           height = MAX_DIMENSION;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.5);
+        
+        try {
+          const res = await fetch('/api/statuses', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentUser, content: compressedBase64, type: 'image' })
+          });
+          if(res.ok) {
+            const data = await res.json();
+            if(data.id) setStatuses(prev => [...prev, data]);
+          } else {
+             const errData = await res.json().catch(()=>({}));
+             setStatusError(`Upload failed: ${errData.error || 'Server error'}`);
+             setTimeout(() => setStatusError(''), 5000);
+          }
+        } catch(err) {
+          setStatusError('Network error during upload.');
+          setTimeout(() => setStatusError(''), 4000);
+        } finally {
+          setIsUploadingStatus(false);
+        }
+      };
+      
+      img.onerror = () => {
+         setStatusError('Invalid image format.');
+         setIsUploadingStatus(false);
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleDeleteStatus = async (statusId) => {
+    try {
+      await fetch('/api/statuses', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: statusId, username: currentUser })
+      });
+      setStatuses(prev => prev.filter(s => s.id !== statusId));
+      setShowViewersList(false);
+      
+      const remainingMyStatuses = statuses.filter(s => s.username === currentUser && s.id !== statusId);
+      if (remainingMyStatuses.length === 0) {
+         setViewingStatusUser(null);
+      } else if (viewingStatusIndex >= remainingMyStatuses.length) {
+         setViewingStatusIndex(remainingMyStatuses.length - 1);
+         setStatusProgress(0);
+      }
+    } catch(err) { console.error(err); }
+  };
+
   const saveProfile = async (dataToSave) => {
     try {
       await fetch('/api/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: currentUser,
-          ...dataToSave
-        })
+        body: JSON.stringify({ username: currentUser, ...dataToSave })
       });
-    } catch (err) {
-      console.error("Failed to save profile", err);
-    }
+    } catch (err) {}
   };
-
-  const handleLogout = () => {
-    setIsLogged(false);
-    setCurrentUser('');
-    setPassword('');
-    setMessages([]);
-    setActiveChat(null);
-    setShowMenu(false);
-    setShowProfile(false);
-    setShowContactInfo(false);
-    setContactProfiles({});
-    lastSyncRef.current = 0; 
-  };
-
-  useEffect(() => {
-    if (!isLogged) return;
-    let isMounted = true;
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/sync?user=${encodeURIComponent(currentUser)}&after=${lastSyncRef.current}`);
-        
-        if (activeChat && isMounted) {
-            fetch(`/api/profile?username=${encodeURIComponent(activeChat)}`)
-              .then(r => { if (!r.ok) throw new Error('API Error'); return r.json(); })
-              .then(data => {
-                  if (isMounted) {
-                      setContactProfiles(prev => ({
-                          ...prev,
-                          [activeChat]: {
-                              displayName: data.display_name || activeChat,
-                              photo: data.profile_photo || '',
-                              contact: data.contact || '',
-                              lastSeen: data.last_seen || 0,
-                              isGroup: data.isGroup || false,
-                              groupMembers: data.groupMembers || []
-                          }
-                      }));
-                  }
-              }).catch(() => {});
-        }
-
-        if (!isMounted || res.status === 204) return;
-        if (!res.ok) throw new Error('Sync API Error');
-
-        const newMsgs = await res.json();
-        if (newMsgs && newMsgs.length > 0) {
-          const maxTimestamp = Math.max(...newMsgs.map(m => m.timestamp));
-          lastSyncRef.current = maxTimestamp;
-          
-          setMessages(prev => {
-            const existingIds = new Set(prev.map(m => m.id));
-            const uniqueNew = newMsgs.filter(m => !existingIds.has(m.id));
-            return [...prev, ...uniqueNew].sort((a, b) => a.timestamp - b.timestamp);
-          });
-        }
-      } catch (err) {
-        console.error("Polling error", err);
-      }
-    };
-
-    poll();
-    const intervalId = setInterval(poll, 2000);
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-    };
-  }, [isLogged, currentUser, activeChat]);
 
   const handleSendMessage = async (e) => {
     e?.preventDefault();
     if (!inputText.trim() || !activeChat) return;
-
     const textToSend = inputText.trim();
     setInputText('');
     setShowEmojis(false);
-    
     sendPayload(textToSend, 'text', null);
   };
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !activeChat) return;
-    
     const reader = new FileReader();
     reader.onloadend = async () => {
       const base64 = reader.result;
@@ -242,28 +468,21 @@ export default function WhatsAppClone() {
 
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(track => track.stop()); 
-        
         if (isCancelledRef.current) return; 
-        
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = async () => {
-          const base64Audio = reader.result;
-          sendPayload('Voice Message', 'audio', base64Audio);
+          sendPayload('Voice Message', 'audio', reader.result);
         };
       };
 
       mediaRecorder.start();
       setIsRecording(true);
       setRecordingTime(0);
-      
-      timerRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1);
-      }, 1000);
+      timerRef.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000);
     } catch (err) {
-      console.error("Error accessing microphone:", err);
-      alert("Microphone access denied. Please check your browser permissions.");
+      alert("Microphone access denied.");
     }
   };
 
@@ -294,7 +513,6 @@ export default function WhatsAppClone() {
       status: 'sending',
       pending: true
     };
-    
     setMessages(prev => [...prev, optimisticMsg]);
     lastSyncRef.current = optimisticMsg.timestamp;
 
@@ -302,30 +520,20 @@ export default function WhatsAppClone() {
       const res = await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sender: currentUser,
-          receiver: activeChat,
-          text: text,
-          type: type,
-          media: media
-        })
+        body: JSON.stringify({ sender: currentUser, receiver: activeChat, text: text, type: type, media: media })
       });
-      if (!res.ok) throw new Error("Send failed");
-      const savedMsg = await res.json();
-      setMessages(prev => prev.map(m => m.id === optimisticMsg.id ? savedMsg : m));
-    } catch (error) {
-      console.error("Failed to send", error);
-    }
+      if (res.ok) {
+         const savedMsg = await res.json();
+         setMessages(prev => prev.map(m => m.id === optimisticMsg.id ? savedMsg : m));
+      }
+    } catch (error) {}
   };
 
   const conversations = React.useMemo(() => {
     const chatMap = new Map();
 
     messages.forEach(msg => {
-      const contact = msg.receiver.startsWith('#group_') 
-        ? msg.receiver 
-        : (msg.sender === currentUser ? msg.receiver : msg.sender);
-        
+      const contact = msg.receiver.startsWith('#group_') ? msg.receiver : (msg.sender === currentUser ? msg.receiver : msg.sender);
       const isUnread = msg.sender !== currentUser && msg.status !== 'read';
       const existing = chatMap.get(contact);
 
@@ -370,11 +578,8 @@ export default function WhatsAppClone() {
   const activeChatMessages = React.useMemo(() => {
     if (!activeChat) return [];
     return messages.filter(m => {
-      if (activeChat.startsWith('#group_')) {
-        return m.receiver === activeChat;
-      }
-      return (m.sender === currentUser && m.receiver === activeChat) ||
-             (m.sender === activeChat && m.receiver === currentUser);
+      if (activeChat.startsWith('#group_')) return m.receiver === activeChat;
+      return (m.sender === currentUser && m.receiver === activeChat) || (m.sender === activeChat && m.receiver === currentUser);
     });
   }, [messages, activeChat, currentUser]);
 
@@ -392,30 +597,34 @@ export default function WhatsAppClone() {
     
     const fetchContactProfile = (contact) => {
       if (!contact || contactProfiles[contact] || fetchingProfiles.current.has(contact)) return;
-      
       fetchingProfiles.current.add(contact);
       fetch(`/api/profile?username=${encodeURIComponent(contact)}`)
-        .then(res => { if (!res.ok) throw new Error('API Error'); return res.json(); })
+        .then(async res => { if (!res.ok) throw new Error(await res.text()); return res.json(); })
         .then(data => {
-          setContactProfiles(prev => ({
-            ...prev,
-            [contact]: {
-              displayName: data.display_name || contact,
-              photo: data.profile_photo || '',
-              contact: data.contact || '',
-              lastSeen: data.last_seen || 0,
-              isGroup: data.isGroup || false,
-              groupMembers: data.groupMembers || []
-            }
-          }));
+          if (!data.error) {
+            setContactProfiles(prev => ({
+              ...prev,
+              [contact]: {
+                displayName: data.display_name || data.name || contact,
+                photo: data.profile_photo || '',
+                contact: data.contact || '',
+                lastSeen: data.last_seen || 0,
+                isGroup: data.isGroup || false,
+                groupMembers: data.groupMembers || []
+              }
+            }));
+          }
         })
-        .catch(err => console.error(`Failed to fetch profile for ${contact}`, err));
+        .catch(err => console.error("Profile Fetch Error", err))
+        .finally(() => {
+          // CRITICAL FIX: Delete from fetching map so it can retry if it failed!
+          fetchingProfiles.current.delete(contact);
+        });
     };
 
-    if (conversations) {
-      conversations.forEach(c => fetchContactProfile(c.contact));
-    }
-  }, [conversations, isLogged]);
+    if (conversations) conversations.forEach(c => fetchContactProfile(c.contact));
+    Object.keys(groupedStatuses).forEach(u => fetchContactProfile(u));
+  }, [conversations, groupedStatuses, isLogged]);
 
   const handleSuggestionClick = (suggestion) => {
      const parts = newChatTargets.split(',');
@@ -431,7 +640,7 @@ export default function WhatsAppClone() {
     const targets = newChatTargets.split(',').map(s => s.trim().toLowerCase()).filter(s => s && s !== currentUser);
     if (targets.length === 0) return;
 
-    if (targets.length === 1) {
+    if (targets.length === 1 && !newChatTargets.includes(',')) {
       try {
         const res = await fetch(`/api/profile?username=${encodeURIComponent(targets[0])}`);
         if (!res.ok) throw new Error("Not found");
@@ -445,33 +654,54 @@ export default function WhatsAppClone() {
         } else {
           setNewChatError('User not found. Check the username.');
         }
-      } catch (err) {
-        setNewChatError('Error verifying user.');
-      }
+      } catch (err) { setNewChatError('Error verifying user.'); }
     } else {
       try {
+        const finalGroupName = groupSubject.trim() || `${userProfile.displayName || currentUser}'s Group`;
         const res = await fetch('/api/groups', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name: groupSubject.trim() || `${userProfile.displayName || currentUser}'s Group`,
+            name: finalGroupName,
             createdBy: currentUser,
             members: [currentUser, ...targets]
           })
         });
-        if (!res.ok) throw new Error("Group error");
+        
+        if (!res.ok) {
+           const errData = await res.json().catch(()=>({}));
+           throw new Error(errData.error || "Server error creating group.");
+        }
+        
         const data = await res.json();
         if (data.id) {
+          // CRITICAL FIX: Instantly populate the contact profile so UI shows Admin tools immediately
+          setContactProfiles(prev => ({
+            ...prev,
+            [data.id]: {
+              displayName: data.name,
+              photo: '',
+              contact: `Group Members: ${data.members.join(', ')}`,
+              lastSeen: Date.now(),
+              isGroup: true,
+              groupMembers: data.members.map(m => ({ 
+                username: m, 
+                display_name: m,
+                role: m === currentUser ? 'admin' : 'member' 
+              }))
+            }
+          }));
+
           setActiveChat(data.id);
           setShowContactInfo(false);
           setNewChatPrompt(false);
           setNewChatTargets('');
           setGroupSubject('');
-        } else {
-          setNewChatError('Failed to create group.');
+        } else { 
+          setNewChatError('Failed to create group.'); 
         }
-      } catch (err) {
-        setNewChatError('Failed to create group.');
+      } catch (err) { 
+        setNewChatError(err.message || 'Failed to create group.'); 
       }
     }
   };
@@ -486,10 +716,7 @@ export default function WhatsAppClone() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user1: currentUser, user2: activeChat })
       });
-      setMessages(prev => prev.filter(m => !(
-        (m.sender === currentUser && m.receiver === activeChat) ||
-        (m.sender === activeChat && m.receiver === currentUser)
-      )));
+      setMessages(prev => prev.filter(m => !((m.sender === currentUser && m.receiver === activeChat) || (m.sender === activeChat && m.receiver === currentUser))));
     }
     setActiveChat(null);
     setShowContactInfo(false);
@@ -532,10 +759,7 @@ export default function WhatsAppClone() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ groupId: activeChat, profile_photo: base64String, updatedBy: currentUser })
         });
-        setContactProfiles(prev => ({
-          ...prev,
-          [activeChat]: { ...prev[activeChat], photo: base64String }
-        }));
+        setContactProfiles(prev => ({ ...prev, [activeChat]: { ...prev[activeChat], photo: base64String } }));
       };
       reader.readAsDataURL(file);
     }
@@ -548,10 +772,7 @@ export default function WhatsAppClone() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ groupId: activeChat, name: editGroupName, updatedBy: currentUser })
     });
-    setContactProfiles(prev => ({
-      ...prev,
-      [activeChat]: { ...prev[activeChat], displayName: editGroupName }
-    }));
+    setContactProfiles(prev => ({ ...prev, [activeChat]: { ...prev[activeChat], displayName: editGroupName } }));
     setEditGroupName('');
   };
 
@@ -561,124 +782,50 @@ export default function WhatsAppClone() {
       setAuthError('');
       
       const endpoint = authMode === 'signup' ? '/api/auth/register' : '/api/auth/login';
-      const payload = authMode === 'signup' 
-        ? { username: currentUser.trim(), password: password.trim(), contact: emailOrPhone.trim() }
-        : { username: currentUser.trim(), password: password.trim() };
+      const payload = authMode === 'signup' ? { username: currentUser.trim(), password: password.trim(), contact: emailOrPhone.trim() } : { username: currentUser.trim(), password: password.trim() };
 
       try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          setAuthError('Server crash! Check your .env.local file and Database connection.');
+          return;
+        }
 
         const data = await res.json();
-
-        if (res.ok) {
-          setIsLogged(true);
-        } else {
-          setAuthError(data.error || 'Authentication failed');
-        }
-      } catch (err) {
-        setAuthError('Network error. Please try again.');
-      }
+        if (res.ok) setIsLogged(true);
+        else setAuthError(data.error || 'Authentication failed');
+      } catch (err) { setAuthError('Network error. Please try again.'); }
     };
 
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f0f2f5] font-sans p-4">
         <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
           <div className="flex flex-col items-center justify-center mb-8">
-            <div className="text-[#25D366] mb-4">
-              <MessageSquare size={56} />
-            </div>
-            <h1 className="text-2xl font-medium text-[#111b21]">
-              {authMode === 'signin' ? 'Sign in to WhatsApp' : 'Create an account'}
-            </h1>
-            <p className="text-[#667781] text-sm mt-2 text-center">
-              {authMode === 'signin' 
-                ? 'Enter your credentials to access your chats.' 
-                : 'Join to start sending messages to your friends.'}
-            </p>
+            <div className="text-[#25D366] mb-4"><MessageSquare size={56} /></div>
+            <h1 className="text-2xl font-medium text-[#111b21]">{authMode === 'signin' ? 'Sign in to WhatsApp' : 'Create an account'}</h1>
           </div>
-
-          {authError && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-sm text-center">
-              {authError}
-            </div>
-          )}
-
+          {authError && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-sm text-center">{authError}</div>}
           <form onSubmit={handleAuth} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-[#41525d] mb-1">Username</label>
-              <input
-                type="text"
-                autoFocus
-                placeholder="e.g. john_doe"
-                className="w-full p-3 bg-[#f0f2f5] border border-transparent text-[#41525d] rounded-lg focus:outline-none focus:bg-white focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all"
-                value={currentUser}
-                onChange={e => setCurrentUser(e.target.value.toLowerCase())}
-                required
-              />
+              <input type="text" autoFocus className="w-full p-3 bg-[#f0f2f5] border border-transparent rounded-lg focus:outline-none focus:bg-white focus:border-[#00a884]" value={currentUser} onChange={e => setCurrentUser(e.target.value.toLowerCase())} required />
             </div>
-
             {authMode === 'signup' && (
               <div>
-                <label className="block text-sm font-medium text-[#41525d] mb-1">Email or Phone Number</label>
-                <input
-                  type="text"
-                  placeholder="name@example.com or +1234567890"
-                  className="w-full p-3 bg-[#f0f2f5] border border-transparent text-[#41525d] rounded-lg focus:outline-none focus:bg-white focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all"
-                  value={emailOrPhone}
-                  onChange={e => setEmailOrPhone(e.target.value)}
-                  required
-                />
+                <label className="block text-sm font-medium text-[#41525d] mb-1">Email or Phone</label>
+                <input type="text" className="w-full p-3 bg-[#f0f2f5] border border-transparent rounded-lg focus:outline-none focus:bg-white focus:border-[#00a884]" value={emailOrPhone} onChange={e => setEmailOrPhone(e.target.value)} required />
               </div>
             )}
-
             <div>
               <label className="block text-sm font-medium text-[#41525d] mb-1">Password</label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                className="w-full p-3 bg-[#f0f2f5] border border-transparent text-[#41525d] rounded-lg focus:outline-none focus:bg-white focus:border-[#00a884] focus:ring-1 focus:ring-[#00a884] transition-all"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-              />
+              <input type="password" className="w-full p-3 bg-[#f0f2f5] border border-transparent rounded-lg focus:outline-none focus:bg-white focus:border-[#00a884]" value={password} onChange={e => setPassword(e.target.value)} required />
             </div>
-
-            <button 
-              type="submit" 
-              className="w-full bg-[#00a884] hover:bg-[#017561] text-white p-3 rounded-lg font-medium transition-colors mt-6 shadow-sm"
-            >
-              {authMode === 'signin' ? 'Sign In' : 'Sign Up'}
-            </button>
+            <button type="submit" className="w-full bg-[#00a884] hover:bg-[#017561] text-white p-3 rounded-lg font-medium transition-colors mt-6">{authMode === 'signin' ? 'Sign In' : 'Sign Up'}</button>
           </form>
-
           <div className="mt-6 text-center text-sm text-[#54656f]">
-            {authMode === 'signin' ? (
-              <p>
-                Don't have an account?{' '}
-                <button 
-                  type="button"
-                  onClick={() => { setAuthMode('signup'); setPassword(''); setEmailOrPhone(''); setAuthError(''); }} 
-                  className="text-[#00a884] font-medium hover:underline focus:outline-none"
-                >
-                  Sign up
-                </button>
-              </p>
-            ) : (
-              <p>
-                Already have an account?{' '}
-                <button 
-                  type="button"
-                  onClick={() => { setAuthMode('signin'); setPassword(''); setAuthError(''); }} 
-                  className="text-[#00a884] font-medium hover:underline focus:outline-none"
-                >
-                  Sign in
-                </button>
-              </p>
-            )}
+            {authMode === 'signin' ? <p>Don't have an account? <button type="button" onClick={() => { setAuthMode('signup'); setPassword(''); setEmailOrPhone(''); setAuthError(''); }} className="text-[#00a884] font-medium hover:underline">Sign up</button></p> : <p>Already have an account? <button type="button" onClick={() => { setAuthMode('signin'); setPassword(''); setAuthError(''); }} className="text-[#00a884] font-medium hover:underline">Sign in</button></p>}
           </div>
         </div>
       </div>
@@ -689,118 +836,81 @@ export default function WhatsAppClone() {
   const isGroup = activeChat?.startsWith('#group_');
   const myRole = isGroup ? activeProfile?.groupMembers?.find(m => m.username === currentUser)?.role : null;
   const isAdmin = myRole === 'admin';
-  
   const currentTypingWord = newChatTargets.split(',').pop().trim();
-  const suggestions = currentTypingWord 
-    ? knownContacts.filter(c => c.toLowerCase().includes(currentTypingWord.toLowerCase()) && c !== currentUser)
-    : [];
+  const suggestions = currentTypingWord ? knownContacts.filter(c => c.toLowerCase().includes(currentTypingWord.toLowerCase()) && c !== currentUser) : [];
+  const myStatuses = groupedStatuses[currentUser] || [];
 
   return (
     <div className="flex h-screen w-full bg-[#d1d7db] font-sans overflow-hidden">
       <div className="flex w-full h-full max-w-[1600px] mx-auto md:py-4 md:px-4 shadow-xl">
         <div className="flex w-full h-full bg-white md:rounded-lg overflow-hidden shadow-sm relative">
           
-          {/* LEFT SIDEBAR */}
-          <div className={`flex flex-col w-full md:w-[350px] lg:w-[400px] border-r border-[#e9edef] transition-all duration-300 ${activeChat ? 'hidden md:flex' : 'flex'} relative overflow-hidden`}>
+          {/* Sidebar */}
+          <div className={`flex flex-col w-full md:w-[350px] lg:w-[400px] border-r border-[#e9edef] transition-all duration-300 ${activeChat || viewingStatusUser ? 'hidden md:flex' : 'flex'} relative overflow-hidden`}>
             
-            {/* PROFILE DRAWER */}
+            {/* Profile Drawer */}
             <div className={`absolute inset-0 bg-[#f0f2f5] z-50 flex flex-col transition-transform duration-300 ease-in-out ${showProfile ? 'translate-x-0' : '-translate-x-full'}`}>
               <div className="h-[108px] bg-[#008069] flex items-end pb-4 px-6 text-white gap-6 shrink-0 shadow-sm">
-                <button onClick={() => setShowProfile(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors">
-                  <ArrowLeft size={24} />
-                </button>
+                <button onClick={() => setShowProfile(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors"><ArrowLeft size={24} /></button>
                 <h1 className="text-[19px] font-medium">Profile</h1>
               </div>
-              
               <div className="flex-1 overflow-y-auto">
                 <div className="flex justify-center py-7">
                   <div className="relative group cursor-pointer w-48 h-48 rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center text-white shadow-sm" onClick={() => fileInputRef.current?.click()}>
-                    {userProfile.photo ? (
-                      <img src={userProfile.photo} alt="Profile" className="w-full h-full object-cover" />
-                    ) : (
-                      <User size={80} className="text-[#a6b0b5]" />
-                    )}
-                    <div className="absolute inset-0 bg-black/50 hidden group-hover:flex flex-col items-center justify-center text-white text-sm text-center transition-all">
-                      <Camera size={24} className="mb-2" />
-                      <span className="w-24 leading-tight uppercase font-medium">Change Profile Photo</span>
-                    </div>
+                    {userProfile.photo ? <img src={userProfile.photo} className="w-full h-full object-cover" /> : <User size={80} className="text-[#a6b0b5]" />}
+                    <div className="absolute inset-0 bg-black/50 hidden group-hover:flex flex-col items-center justify-center text-white text-sm text-center transition-all"><Camera size={24} className="mb-2" /><span className="w-24 leading-tight uppercase font-medium">Change Photo</span></div>
                   </div>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handlePhotoUpload} />
                 </div>
-
                 <div className="bg-white px-7 py-3 mb-4 shadow-sm">
                   <p className="text-[#008069] text-[14px] mb-4">Your name</p>
                   <div className="flex justify-between items-center border-b border-[#008069] pb-2">
-                    <input 
-                      value={editName} 
-                      onChange={e => setEditName(e.target.value)} 
-                      className="w-full focus:outline-none text-[#111b21] bg-transparent" 
-                    />
-                    <button 
-                      onClick={() => { 
-                        saveProfile({ display_name: editName }); 
-                        setUserProfile(prev => ({...prev, displayName: editName})); 
-                      }}
-                      className="p-1 hover:bg-gray-100 rounded-full"
-                    >
-                      <Save size={20} className="text-[#8696a0]" />
-                    </button>
-                  </div>
-                  <p className="text-[#667781] text-[13px] mt-4">This is not your username or pin. This name will be visible to your WhatsApp contacts.</p>
-                </div>
-
-                <div className="bg-white px-7 py-3 shadow-sm">
-                  <p className="text-[#008069] text-[14px] mb-4">Update Password</p>
-                  <div className="flex justify-between items-center border-b border-[#e9edef] focus-within:border-[#008069] pb-2 transition-colors">
-                    <input 
-                      type="password" 
-                      placeholder="Enter new password" 
-                      value={newPassword} 
-                      onChange={e => setNewPassword(e.target.value)} 
-                      className="w-full focus:outline-none text-[#111b21] bg-transparent placeholder:text-[#8696a0]" 
-                    />
-                    <button 
-                      onClick={() => { 
-                        if(newPassword) { 
-                          saveProfile({ password: newPassword }); 
-                          setNewPassword(''); 
-                          alert('Password updated successfully');
-                        } 
-                      }}
-                      className="p-1 hover:bg-gray-100 rounded-full"
-                    >
-                      <Save size={20} className="text-[#8696a0]" />
-                    </button>
+                    <input value={editName} onChange={e => setEditName(e.target.value)} className="w-full focus:outline-none text-[#111b21] bg-transparent" />
+                    <button onClick={() => { saveProfile({ display_name: editName }); setUserProfile(prev => ({...prev, displayName: editName})); }} className="p-1 hover:bg-gray-100 rounded-full"><Save size={20} className="text-[#8696a0]" /></button>
                   </div>
                 </div>
               </div>
             </div>
 
+            {/* Privacy Drawer */}
+            <div className={`absolute inset-0 bg-[#f0f2f5] z-50 flex flex-col transition-transform duration-300 ease-in-out ${showStatusPrivacy ? 'translate-x-0' : '-translate-x-full'}`}>
+              <div className="h-[108px] bg-[#008069] flex items-end pb-4 px-6 text-white gap-6 shrink-0 shadow-sm">
+                <button onClick={() => setShowStatusPrivacy(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors"><ArrowLeft size={24} /></button>
+                <h1 className="text-[19px] font-medium">Status Privacy</h1>
+              </div>
+              <div className="flex-1 overflow-y-auto bg-white p-6">
+                <p className="text-[#667781] text-sm mb-6">Hide my status updates from specific contacts:</p>
+                {knownContacts.length === 0 ? (
+                  <p className="text-[#a6b0b5] text-sm text-center">No contacts yet. Start chatting first!</p>
+                ) : (
+                  <div className="flex flex-col gap-4">
+                    {knownContacts.map(contact => (
+                      <label key={contact} className="flex items-center gap-4 cursor-pointer p-2 hover:bg-[#f5f6f6] rounded-lg">
+                        <input type="checkbox" checked={hiddenUsers.includes(contact)} onChange={(e) => setHiddenUsers(prev => e.target.checked ? [...prev, contact] : prev.filter(u => u !== contact))} className="w-5 h-5 accent-[#00a884] rounded border-gray-300" />
+                        <div className="w-10 h-10 bg-[#dfe5e7] rounded-full overflow-hidden flex-shrink-0">
+                           {contactProfiles[contact]?.photo ? <img src={contactProfiles[contact].photo} className="w-full h-full object-cover"/> : <User className="text-white w-full h-full p-2"/>}
+                        </div>
+                        <span className="text-[#111b21] font-medium">{contactProfiles[contact]?.displayName || contact}</span>
+                      </label>
+                    ))}
+                    <button onClick={saveStatusPrivacy} className="w-full bg-[#00a884] hover:bg-[#017561] text-white p-3 rounded-lg font-medium transition-colors mt-4 shadow-sm">Save Settings</button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Sidebar Navigation */}
             <div className="h-[60px] bg-[#f0f2f5] flex items-center justify-between px-4 flex-shrink-0">
               <div className="flex items-center gap-3 cursor-pointer" onClick={() => setShowProfile(true)}>
                 <div className="w-10 h-10 bg-[#dfe5e7] rounded-full flex items-center justify-center text-white overflow-hidden hover:opacity-80 transition-opacity">
-                  {userProfile.photo ? (
-                    <img src={userProfile.photo} alt="Profile" className="w-full h-full object-cover" />
-                  ) : (
-                    <User size={24} className="text-[#a6b0b5]" />
-                  )}
+                  {userProfile.photo ? <img src={userProfile.photo} className="w-full h-full object-cover" /> : <User size={24} className="text-[#a6b0b5]" />}
                 </div>
-                <span className="font-semibold text-[#111b21]">{userProfile.displayName || currentUser}</span>
               </div>
-              <div className="flex items-center gap-3 text-[#54656f]">
-                <button 
-                  onClick={() => { 
-                    setNewChatPrompt(!newChatPrompt); 
-                    setNewChatError(''); 
-                  }} 
-                  className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors"
-                >
-                  <Plus size={20} />
-                </button>
+              <div className="flex items-center gap-2 text-[#54656f]">
+                <button onClick={() => { setActiveTab(activeTab === 'chats' ? 'status' : 'chats'); setNewChatPrompt(false); }} className={`p-2 rounded-full transition-colors ${activeTab === 'status' ? 'bg-[#d9d9d9] text-[#111b21]' : 'hover:bg-[#d9d9d9]'}`}><CircleDashed size={20} /></button>
+                <button onClick={() => { setNewChatPrompt(!newChatPrompt); setNewChatError(''); setActiveTab('chats'); }} className={`p-2 rounded-full transition-colors ${newChatPrompt ? 'bg-[#d9d9d9]' : 'hover:bg-[#d9d9d9]'}`}><Plus size={20} /></button>
                 <div className="relative">
-                  <button onClick={() => setShowMenu(!showMenu)} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors">
-                    <MoreVertical size={20} />
-                  </button>
+                  <button onClick={() => setShowMenu(!showMenu)} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors"><MoreVertical size={20} /></button>
                   {showMenu && (
                     <div className="absolute right-0 top-10 bg-white shadow-lg rounded-md py-2 w-40 z-50 border border-[#e9edef]">
                       <button onClick={() => { setShowMenu(false); setShowProfile(true); }} className="w-full text-left px-4 py-2 text-sm text-[#41525d] hover:bg-[#f5f6f6]">Profile</button>
@@ -811,184 +921,256 @@ export default function WhatsAppClone() {
               </div>
             </div>
 
-            {}
-            {/* NEW CHAT / GROUP CHAT CREATION UI */}
-            {newChatPrompt && (
+            {/* Start New Chat / Group Box */}
+            {newChatPrompt && activeTab === 'chats' && (
               <div className="bg-white p-3 border-b border-[#e9edef] relative z-20">
                  <form onSubmit={handleNewChat} className="flex flex-col gap-2">
                     <div className="flex gap-2">
-                      <input 
-                        name="contact" 
-                        value={newChatTargets}
-                        onChange={e => setNewChatTargets(e.target.value)}
-                        placeholder="Names (comma separated for groups)" 
-                        className="flex-1 bg-[#f0f2f5] text-[#41525d] px-3 py-2 rounded-lg text-sm focus:outline-none" 
-                        autoFocus 
-                      />
+                      <input value={newChatTargets} onChange={e => setNewChatTargets(e.target.value)} placeholder="Names (comma separated for groups)" className="flex-1 bg-[#f0f2f5] text-[#41525d] px-3 py-2 rounded-lg text-sm focus:outline-none" autoFocus />
                       <button type="submit" className="bg-[#00a884] text-white px-4 py-2 rounded-lg text-sm font-medium">Chat</button>
                     </div>
-                    {newChatTargets.includes(',') && (
-                       <div className="mt-1">
-                          <input 
-                            name="subject" 
-                            value={groupSubject}
-                            onChange={e => setGroupSubject(e.target.value)}
-                            placeholder="Group Subject (Optional)" 
-                            className="w-full bg-[#f0f2f5] text-[#41525d] px-3 py-2 rounded-lg text-sm focus:outline-none" 
-                          />
-                       </div>
-                    )}
+                    {newChatTargets.includes(',') && <input value={groupSubject} onChange={e => setGroupSubject(e.target.value)} placeholder="Group Subject (Optional)" className="w-full bg-[#f0f2f5] text-[#41525d] px-3 py-2 rounded-lg text-sm focus:outline-none mt-1" />}
                     {newChatError && <span className="text-red-500 text-xs ml-1 font-medium">{newChatError}</span>}
                  </form>
-                 
                  {suggestions.length > 0 && (
                    <div className="absolute top-[50px] left-3 right-3 bg-white border border-[#e9edef] shadow-lg rounded-lg max-h-48 overflow-y-auto">
                      {suggestions.map(s => (
-                       <div 
-                         key={s} 
-                         onClick={() => handleSuggestionClick(s)}
-                         className="px-4 py-2 hover:bg-[#f5f6f6] cursor-pointer text-sm text-[#111b21] flex items-center gap-2"
-                       >
-                         <User size={16} className="text-[#8696a0]"/> {s}
-                       </div>
+                       <div key={s} onClick={() => handleSuggestionClick(s)} className="px-4 py-2 hover:bg-[#f5f6f6] cursor-pointer text-sm text-[#111b21] flex items-center gap-2"><User size={16} className="text-[#8696a0]"/> {s}</div>
                      ))}
                    </div>
                  )}
               </div>
             )}
 
-            <div className="p-2 border-b border-[#e9edef] bg-white">
-              <div className="bg-[#f0f2f5] rounded-lg flex items-center px-3 h-9">
-                <Search size={18} className="text-[#54656f]" />
-                <input 
-                  type="text" 
-                  placeholder="Search or start new chat"
-                  className="bg-transparent border-none focus:outline-none ml-4 text-sm w-full text-[#41525d] placeholder-[#54656f]"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto bg-white">
-              {conversations.length === 0 ? (
-                <div className="text-center p-6 text-[#54656f] text-sm">
-                  No conversations yet. Click the + icon to start a chat.
+            {/* Status Tab OR Chat Tab */}
+            {activeTab === 'status' ? (
+              <div className="flex-1 overflow-y-auto bg-white flex flex-col">
+                <div className="flex justify-between items-center px-4 py-3 bg-white border-b border-[#e9edef]">
+                   <h2 className="text-[#111b21] font-medium text-lg">Status</h2>
+                   <button onClick={() => setShowStatusPrivacy(true)} title="Privacy Settings" className="text-[#54656f] p-2 hover:bg-[#f5f6f6] rounded-full transition-colors"><Settings size={20}/></button>
                 </div>
-              ) : (
-                conversations.map((chat) => (
+                
+                {statusError && (
+                  <div className="mx-4 mt-3 bg-red-50 text-red-600 text-sm p-2 rounded border border-red-100 text-center shadow-sm">
+                    {statusError}
+                  </div>
+                )}
+
+                <div className="flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6]">
                   <div 
-                    key={chat.contact}
-                    onClick={() => { setActiveChat(chat.contact); setShowContactInfo(false); }}
-                    className={`flex items-center px-3 py-2.5 cursor-pointer hover:bg-[#f5f6f6] transition-colors ${activeChat === chat.contact ? 'bg-[#f0f2f5]' : ''}`}
+                    className={`relative w-12 h-12 rounded-full mr-3 flex items-center justify-center flex-shrink-0 ${myStatuses.length > 0 ? 'border-[3px] border-[#00a884] p-0.5' : ''}`}
+                    onClick={(e) => {
+                       e.stopPropagation();
+                       if (isUploadingStatus) return; 
+                       if(myStatuses.length > 0) {
+                         setViewingStatusUser(currentUser);
+                         setViewingStatusIndex(0);
+                         setStatusProgress(0);
+                         setShowViewersList(false);
+                       } else {
+                         statusUploadRef.current?.click();
+                       }
+                    }}
                   >
-                    <div className="w-12 h-12 bg-[#dfe5e7] rounded-full flex items-center justify-center text-white mr-3 flex-shrink-0 overflow-hidden relative">
-                      {contactProfiles[chat.contact]?.photo ? (
-                        <img src={contactProfiles[chat.contact].photo} alt="Profile" className="w-full h-full object-cover" />
-                      ) : (
-                        <span className="font-semibold text-lg text-[#a6b0b5]">
-                          {contactProfiles[chat.contact]?.displayName ? contactProfiles[chat.contact].displayName.charAt(0).toUpperCase() : chat.contact.charAt(0).toUpperCase()}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0 border-b border-[#f2f2f2] pb-2 pt-1">
-                      <div className="flex justify-between items-baseline mb-0.5">
-                        <span className="font-normal text-base text-[#111b21] truncate flex items-center gap-1.5">
-                          {contactProfiles[chat.contact]?.displayName || chat.contact}
-                          {!chat.contact.startsWith('#group_') && isOnline(contactProfiles[chat.contact]?.lastSeen) && (
-                            <span className="w-2 h-2 bg-[#25D366] rounded-full shadow-sm"></span>
-                          )}
-                        </span>
-                        <span className={`text-xs ${chat.unreadCount > 0 ? 'text-[#25D366] font-medium' : 'text-[#667781]'}`}>
-                          {new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-sm text-[#667781] w-full">
-                        <div className="flex items-center truncate">
-                          {chat.isMyLast && (
-                             <span className="mr-1 flex-shrink-0">
-                               {chat.status === 'read' ? <CheckCheck size={14} className="text-[#53bdeb]" /> : 
-                                chat.status === 'delivered' ? <CheckCheck size={14} className="text-[#8696a0]" /> : 
-                                <Check size={14} className="text-[#8696a0]" />}
-                             </span>
-                          )}
-                          <span className="truncate">{chat.lastMessage}</span>
-                        </div>
-                        {chat.unreadCount > 0 && (
-                          <div className="bg-[#25D366] text-white text-[11px] font-bold px-1.5 py-0.5 min-w-[20px] h-[20px] rounded-full flex items-center justify-center shadow-sm ml-2 flex-shrink-0">
-                            {chat.unreadCount}
+                    <div className="w-full h-full rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center relative">
+                       {userProfile.photo ? <img src={userProfile.photo} className="w-full h-full object-cover"/> : <User size={24} className="text-white" />}
+                       {isUploadingStatus && (
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                             <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                           </div>
-                        )}
-                      </div>
+                       )}
+                    </div>
+                    <div className="absolute bottom-0 right-[-2px] bg-[#00a884] rounded-full p-0.5 border-2 border-white shadow-sm" onClick={(e) => { e.stopPropagation(); statusUploadRef.current?.click(); }}>
+                      <Plus size={14} className="text-white font-bold" />
                     </div>
                   </div>
-                ))
-              )}
-            </div>
+                  <div className="flex-1 border-b border-[#f2f2f2] pb-3 pt-1" onClick={() => statusUploadRef.current?.click()}>
+                    <h3 className="text-[#111b21] font-medium text-[16px]">My status</h3>
+                    <p className="text-[#667781] text-[13px]">{isUploadingStatus ? 'Uploading...' : myStatuses.length > 0 ? 'Click avatar to view, text to add' : 'Tap to add status update'}</p>
+                  </div>
+                </div>
+                <input type="file" accept="image/*,video/*" className="hidden" ref={statusUploadRef} onChange={handleStatusUpload} />
+
+                <div className="px-5 py-3 text-[#008069] text-[14px] bg-white">RECENT UPDATES</div>
+                {Object.keys(groupedStatuses).filter(u => u !== currentUser).length === 0 && <div className="px-5 py-2 text-[#667781] text-sm">No recent updates</div>}
+                
+                {Object.keys(groupedStatuses).filter(u => u !== currentUser).map(u => (
+                  <div key={u} className="flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6]" onClick={() => { setViewingStatusUser(u); setViewingStatusIndex(0); setStatusProgress(0); setShowViewersList(false); setActiveChat(null); }}>
+                    <div className="relative w-12 h-12 rounded-full mr-3 p-0.5 border-2 border-[#00a884] flex-shrink-0">
+                       <div className="w-full h-full rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center">
+                         {contactProfiles[u]?.photo ? <img src={contactProfiles[u].photo} className="w-full h-full object-cover"/> : <User size={24} className="text-white"/>}
+                       </div>
+                    </div>
+                    <div className="flex-1 border-b border-[#f2f2f2] pb-3 pt-1">
+                      <h3 className="text-[#111b21] font-normal text-[16px]">{contactProfiles[u]?.displayName || u}</h3>
+                      <p className="text-[#667781] text-[13px]">{new Date(groupedStatuses[u][groupedStatuses[u].length - 1].timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                <div className="p-2 border-b border-[#e9edef] bg-white">
+                  <div className="bg-[#f0f2f5] rounded-lg flex items-center px-3 h-9">
+                    <Search size={18} className="text-[#54656f]" />
+                    <input type="text" placeholder="Search or start new chat" className="bg-transparent border-none focus:outline-none ml-4 text-sm w-full text-[#41525d] placeholder-[#54656f]" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto bg-white">
+                  {conversations.length === 0 ? (
+                    <div className="text-center p-6 text-[#54656f] text-sm">No conversations yet. Click the + icon to start a chat.</div>
+                  ) : (
+                    conversations.map((chat) => (
+                      <div key={chat.contact} onClick={() => { setActiveChat(chat.contact); setShowContactInfo(false); setViewingStatusUser(null); }} className={`flex items-center px-3 py-2.5 cursor-pointer hover:bg-[#f5f6f6] transition-colors ${activeChat === chat.contact ? 'bg-[#f0f2f5]' : ''}`}>
+                        <div className="w-12 h-12 bg-[#dfe5e7] rounded-full flex items-center justify-center text-white mr-3 flex-shrink-0 overflow-hidden relative">
+                          {contactProfiles[chat.contact]?.photo ? <img src={contactProfiles[chat.contact].photo} alt="Profile" className="w-full h-full object-cover" /> : <span className="font-semibold text-lg text-[#a6b0b5]">{contactProfiles[chat.contact]?.displayName ? contactProfiles[chat.contact].displayName.charAt(0).toUpperCase() : chat.contact.charAt(0).toUpperCase()}</span>}
+                        </div>
+                        <div className="flex-1 min-w-0 border-b border-[#f2f2f2] pb-2 pt-1">
+                          <div className="flex justify-between items-baseline mb-0.5">
+                            <span className="font-normal text-base text-[#111b21] truncate flex items-center gap-1.5">
+                              {contactProfiles[chat.contact]?.displayName || chat.contact}
+                              {!chat.contact.startsWith('#group_') && isOnline(contactProfiles[chat.contact]?.lastSeen) && <span className="w-2 h-2 bg-[#25D366] rounded-full shadow-sm"></span>}
+                            </span>
+                            <span className={`text-xs ${chat.unreadCount > 0 ? 'text-[#25D366] font-medium' : 'text-[#667781]'}`}>{new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm text-[#667781] w-full">
+                            <div className="flex items-center truncate">
+                              {chat.isMyLast && <span className="mr-1 flex-shrink-0">{chat.status === 'read' ? <CheckCheck size={14} className="text-[#53bdeb]" /> : chat.status === 'delivered' ? <CheckCheck size={14} className="text-[#8696a0]" /> : <Check size={14} className="text-[#8696a0]" />}</span>}
+                              <span className="truncate">{chat.lastMessage}</span>
+                            </div>
+                            {chat.unreadCount > 0 && <div className="bg-[#25D366] text-white text-[11px] font-bold px-1.5 py-0.5 min-w-[20px] h-[20px] rounded-full flex items-center justify-center shadow-sm ml-2 flex-shrink-0">{chat.unreadCount}</div>}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
-          <div className={`flex-col flex-1 bg-[#efeae2] relative overflow-hidden ${!activeChat ? 'hidden md:flex' : 'flex'}`}>
-            {!activeChat ? (
+          {/* Right Chat Area OR Status Viewer */}
+          <div className={`flex-col flex-1 bg-[#efeae2] relative overflow-hidden ${!activeChat && !viewingStatusUser ? 'hidden md:flex' : 'flex'}`}>
+            
+            {viewingStatusUser ? (() => {
+              const currentStatus = groupedStatuses[viewingStatusUser][viewingStatusIndex];
+              return (
+              <div className="flex-1 bg-[#0b141a] relative flex flex-col justify-center items-center">
+                 
+                 {/* Invisible Navigation Zones */}
+                 <div className="absolute inset-0 z-40 flex">
+                   <div className="w-1/3 h-full cursor-pointer" onClick={(e) => { e.stopPropagation(); handlePrevStatus(); }}></div>
+                   <div className="w-2/3 h-full cursor-pointer" onClick={(e) => { e.stopPropagation(); handleNextStatus(); }}></div>
+                 </div>
+
+                 {/* Progress Bars */}
+                 <div className="absolute top-4 left-4 right-4 flex gap-1 z-50 pointer-events-none">
+                   {groupedStatuses[viewingStatusUser].map((s, i) => (
+                     <div key={i} className="h-1 flex-1 bg-white/30 rounded-full overflow-hidden">
+                       <div className="h-full bg-white transition-all duration-100 ease-linear" style={{ width: i < viewingStatusIndex ? '100%' : i === viewingStatusIndex ? `${statusProgress}%` : '0%' }}></div>
+                     </div>
+                   ))}
+                 </div>
+
+                 {/* Viewer Header */}
+                 <div className="absolute top-8 left-4 right-4 flex justify-between items-center z-50 bg-black/30 p-2 rounded-xl backdrop-blur-md border border-white/10">
+                   <div className="flex items-center gap-3">
+                      <button onClick={() => { setViewingStatusUser(null); setShowViewersList(false); }} className="text-white md:hidden hover:bg-white/20 p-2 rounded-full transition-colors"><ArrowLeft/></button>
+                      <div className="w-11 h-11 rounded-full overflow-hidden bg-[#dfe5e7] border border-white/50">
+                         {contactProfiles[viewingStatusUser]?.photo ? <img src={contactProfiles[viewingStatusUser].photo} className="w-full h-full object-cover"/> : <User className="text-[#a6b0b5] w-full h-full p-2 bg-white"/>}
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-white font-medium text-[16px] drop-shadow-md">{contactProfiles[viewingStatusUser]?.displayName || viewingStatusUser}</span>
+                        <span className="text-white/80 text-[13px] drop-shadow-md">{new Date(currentStatus.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                      </div>
+                   </div>
+                   <div className="flex items-center gap-1">
+                     {viewingStatusUser === currentUser && (
+                       <button onClick={() => handleDeleteStatus(currentStatus.id)} title="Delete Status" className="text-white hover:text-red-500 hover:bg-white/20 p-2.5 rounded-full transition-colors"><Trash2 size={20}/></button>
+                     )}
+                     <button onClick={() => { setViewingStatusUser(null); setShowViewersList(false); }} title="Close Viewer" className="text-white hover:bg-white/20 p-2.5 rounded-full transition-colors"><X size={24}/></button>
+                   </div>
+                 </div>
+
+                 {/* Media Output */}
+                 <div className="w-full h-full flex items-center justify-center p-4 pt-24 pb-12 z-0 pointer-events-none">
+                    {currentStatus.type === 'video' ? (
+                       <video src={currentStatus.content} autoPlay muted playsInline className="max-w-full max-h-full object-contain rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.5)]" />
+                    ) : (
+                       <img src={currentStatus.content} alt="Status" className="max-w-full max-h-full object-contain rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.5)]" />
+                    )}
+                 </div>
+
+                 {/* Viewers Bottom Drawer */}
+                 {viewingStatusUser === currentUser && (
+                   <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center z-50">
+                     <button 
+                       onClick={(e) => { e.stopPropagation(); setShowViewersList(!showViewersList); }}
+                       className="flex flex-col items-center text-white/80 hover:text-white p-4 w-full bg-gradient-to-t from-black/80 to-transparent transition-colors"
+                     >
+                       {showViewersList ? <ChevronDown size={24}/> : <ChevronUp size={24}/>}
+                       <div className="flex items-center gap-2 mt-1 font-medium"><Eye size={20}/> {statusViewers.length}</div>
+                     </button>
+                     
+                     {showViewersList && (
+                       <div className="bg-[#111b21] w-full md:w-[400px] md:mb-4 md:rounded-xl h-[50vh] flex flex-col overflow-hidden shadow-2xl border border-[#222d34]" onClick={e => e.stopPropagation()}>
+                         <div className="p-4 border-b border-[#222d34] flex justify-between items-center bg-[#202c33]">
+                            <h3 className="text-white font-medium text-lg">Viewed by {statusViewers.length}</h3>
+                            <button onClick={() => setShowViewersList(false)} className="text-[#aebac1] hover:text-white"><X size={20}/></button>
+                         </div>
+                         <div className="flex-1 overflow-y-auto p-2">
+                            {statusViewers.length === 0 ? (
+                              <p className="text-[#8696a0] text-center mt-10">No views yet</p>
+                            ) : (
+                              statusViewers.map(v => (
+                                <div key={v.viewer_username} className="flex items-center gap-3 p-3 hover:bg-[#202c33] rounded-lg cursor-pointer">
+                                  <div className="w-12 h-12 bg-[#6a7175] rounded-full overflow-hidden flex-shrink-0">
+                                     {v.profile_photo ? <img src={v.profile_photo} className="w-full h-full object-cover"/> : <User className="text-white w-full h-full p-2.5"/>}
+                                  </div>
+                                  <div className="flex-1 border-b border-[#222d34] pb-2">
+                                     <p className="text-[#e9edef] text-base">{v.display_name || v.viewer_username}</p>
+                                     <p className="text-[#8696a0] text-sm">{new Date(v.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                         </div>
+                       </div>
+                     )}
+                   </div>
+                 )}
+              </div>
+            )})() : !activeChat ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-[#f0f2f5] border-l border-[#e9edef]">
                 <h2 className="text-[32px] text-[#41525d] font-light mb-4">WhatsApp Web Clone</h2>
-                <p className="text-sm text-[#667781] max-w-md">
-                  Send and receive messages without keeping your phone online. <br/>
-                  Built with Next.js, SQLite & REST Polling.
-                </p>
+                <p className="text-sm text-[#667781] max-w-md">Send and receive messages without keeping your phone online.</p>
               </div>
             ) : (
               <>
                 <div className="h-[60px] bg-[#f0f2f5] flex items-center justify-between px-4 z-10 sticky top-0 border-l border-[#e9edef]">
                   <div className="flex items-center gap-1">
-                    <button className="md:hidden text-[#54656f] mr-1" onClick={() => setActiveChat(null)}>
-                      <ArrowLeft size={24} />
-                    </button>
-                    
-                    <div 
-                      className="flex items-center gap-3 cursor-pointer hover:bg-black/5 p-1 rounded-lg transition-colors" 
-                      onClick={() => setShowContactInfo(true)}
-                    >
+                    <button className="md:hidden text-[#54656f] mr-1" onClick={() => setActiveChat(null)}><ArrowLeft size={24} /></button>
+                    <div className="flex items-center gap-3 cursor-pointer hover:bg-black/5 p-1 rounded-lg transition-colors" onClick={() => setShowContactInfo(true)}>
                       <div className="w-10 h-10 bg-[#dfe5e7] rounded-full flex items-center justify-center text-white overflow-hidden flex-shrink-0">
-                        {contactProfiles[activeChat]?.photo ? (
-                          <img src={contactProfiles[activeChat].photo} alt="Profile" className="w-full h-full object-cover" />
-                        ) : (
-                          <span className="font-semibold text-[#a6b0b5]">
-                            {contactProfiles[activeChat]?.displayName ? contactProfiles[activeChat].displayName.charAt(0).toUpperCase() : activeChat.charAt(0).toUpperCase()}
-                          </span>
-                        )}
+                        {contactProfiles[activeChat]?.photo ? <img src={contactProfiles[activeChat].photo} alt="Profile" className="w-full h-full object-cover" /> : <span className="font-semibold text-[#a6b0b5]">{contactProfiles[activeChat]?.displayName ? contactProfiles[activeChat].displayName.charAt(0).toUpperCase() : activeChat.charAt(0).toUpperCase()}</span>}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h2 className="font-normal text-[#111b21]">
-                            {contactProfiles[activeChat]?.displayName || activeChat}
-                          </h2>
-                          {!isGroup && isOnline(contactProfiles[activeChat]?.lastSeen) && (
-                            <div className="w-2.5 h-2.5 bg-[#25D366] rounded-full shadow-sm border border-[#f0f2f5]"></div>
-                          )}
+                          <h2 className="font-normal text-[#111b21]">{contactProfiles[activeChat]?.displayName || activeChat}</h2>
+                          {!isGroup && isOnline(contactProfiles[activeChat]?.lastSeen) && <div className="w-2.5 h-2.5 bg-[#25D366] rounded-full shadow-sm border border-[#f0f2f5]"></div>}
                         </div>
-                        <p className="text-xs text-[#667781] mt-0.5">
-                           {isGroup ? 'Group Chat' : (isOnline(contactProfiles[activeChat]?.lastSeen) ? 'Online' : 'Offline')}
-                        </p>
+                        <p className="text-xs text-[#667781] mt-0.5">{isGroup ? 'Group Chat' : (isOnline(contactProfiles[activeChat]?.lastSeen) ? 'Online' : 'Offline')}</p>
                       </div>
                     </div>
                   </div>
-                  
                   <div className="flex items-center gap-5 text-[#54656f] mr-2">
                     <Video size={22} className="cursor-pointer hover:text-[#41525d] transition-colors" />
                     <Phone size={20} className="cursor-pointer hover:text-[#41525d] transition-colors" />
                   </div>
                 </div>
 
-                {}
-                <div 
-                  className="flex-1 overflow-y-auto p-4 md:px-[6%] lg:px-[9%] py-6 z-0" 
-                  style={{
-                    backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")',
-                    backgroundSize: 'contain',
-                    backgroundRepeat: 'repeat',
-                    opacity: 0.8
-                  }}
-                >
+                <div className="flex-1 overflow-y-auto p-4 md:px-[6%] lg:px-[9%] py-6 z-0" style={{backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: 'contain', backgroundRepeat: 'repeat', opacity: 0.8}}>
                   {activeChatMessages.map((msg, i) => {
                     const isMe = msg.sender === currentUser;
                     const isFirstInGroup = i === 0 || activeChatMessages[i-1].sender !== msg.sender;
@@ -996,61 +1178,23 @@ export default function WhatsAppClone() {
                     if (msg.type === 'system') {
                       return (
                         <div key={msg.id} className="flex justify-center my-2 w-full">
-                           <div className="bg-[#fff5c4] text-[#54656f] text-xs px-3 py-1.5 rounded-lg shadow-sm font-medium text-center max-w-[85%]">
-                             {msg.text}
-                           </div>
+                           <div className="bg-[#fff5c4] text-[#54656f] text-[12.5px] px-3 py-1.5 rounded-lg shadow-sm font-medium text-center max-w-[85%]">{msg.text}</div>
                         </div>
                       );
                     }
 
                     return (
                       <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-1`}>
-                        <div className={`relative max-w-[85%] md:max-w-[70%] rounded-lg px-2.5 pt-1.5 pb-2 shadow-sm
-                          ${isMe ? 'bg-[#d9fdd3]' : 'bg-white'}
-                          ${isFirstInGroup && isMe ? 'rounded-tr-none' : ''}
-                          ${isFirstInGroup && !isMe ? 'rounded-tl-none' : ''}
-                          ${isFirstInGroup ? 'mt-2' : ''}
-                        `}>
+                        <div className={`relative max-w-[85%] md:max-w-[70%] rounded-lg px-2.5 pt-1.5 pb-2 shadow-sm ${isMe ? 'bg-[#d9fdd3]' : 'bg-white'} ${isFirstInGroup && isMe ? 'rounded-tr-none' : ''} ${isFirstInGroup && !isMe ? 'rounded-tl-none' : ''} ${isFirstInGroup ? 'mt-2' : ''}`}>
                           <div className="flex flex-col">
-                            {isGroup && !isMe && isFirstInGroup && (
-                              <span className="text-xs font-bold text-[#e57373] mb-1">{msg.sender}</span>
-                            )}
-                            
-                            {msg.type === 'image' && msg.media && (
-                              <img src={msg.media} alt="attachment" className="max-w-[250px] md:max-w-[300px] rounded-md mb-1 cursor-pointer object-cover" />
-                            )}
-                            
-                            {msg.type === 'document' && msg.media && (
-                               <div className="flex items-center bg-black/5 p-2 rounded-md mb-1 w-48 truncate">
-                                 <Paperclip size={16} className="mr-2 flex-shrink-0 text-[#667781]" />
-                                 <a href={msg.media} download={msg.text} className="text-[#008069] font-medium underline text-sm truncate">{msg.text}</a>
-                               </div>
-                            )}
-
-                            {msg.type === 'audio' && msg.media && (
-                               <div className="flex items-center gap-2 mb-1 min-w-[200px]">
-                                 <Mic size={20} className={isMe ? 'text-[#00a884]' : 'text-[#8696a0]'} />
-                                 <audio controls src={msg.media} className="w-full h-8" />
-                               </div>
-                            )}
-
-                            {(!msg.type || msg.type === 'text') && (
-                              <span className="text-[14.2px] leading-[19px] text-[#111b21] whitespace-pre-wrap break-words pr-8">
-                                {msg.text}
-                              </span>
-                            )}
-                            
+                            {isGroup && !isMe && isFirstInGroup && <span className="text-xs font-bold text-[#e57373] mb-1">{contactProfiles[msg.sender]?.displayName || msg.sender}</span>}
+                            {msg.type === 'image' && msg.media && <img src={msg.media} alt="attachment" className="max-w-[250px] md:max-w-[300px] rounded-md mb-1 cursor-pointer object-cover" />}
+                            {msg.type === 'document' && msg.media && <div className="flex items-center bg-black/5 p-2 rounded-md mb-1 w-48 truncate"><Paperclip size={16} className="mr-2 flex-shrink-0 text-[#667781]" /><a href={msg.media} download={msg.text} className="text-[#008069] font-medium underline text-sm truncate">{msg.text}</a></div>}
+                            {msg.type === 'audio' && msg.media && <div className="flex items-center gap-2 mb-1 min-w-[200px]"><Mic size={20} className={isMe ? 'text-[#00a884]' : 'text-[#8696a0]'} /><audio controls src={msg.media} className="w-full h-8" /></div>}
+                            {(!msg.type || msg.type === 'text') && <span className="text-[14.2px] leading-[19px] text-[#111b21] whitespace-pre-wrap break-words pr-8">{msg.text}</span>}
                             <div className={`flex items-center justify-end gap-1 float-right self-end ${msg.type === 'audio' ? 'mt-1' : 'mt-[-10px]'}`}>
-                               <span className="text-[10px] text-[#667781] pt-1">
-                                 {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                               </span>
-                               {isMe && (
-                                 <span className="pt-1">
-                                   {msg.status === 'read' ? <CheckCheck size={13} className="text-[#53bdeb]" /> : 
-                                    msg.status === 'delivered' ? <CheckCheck size={13} className="text-[#8696a0]" /> : 
-                                    <Check size={13} className="text-[#667781]" />}
-                                 </span>
-                               )}
+                               <span className="text-[10px] text-[#667781] pt-1">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                               {isMe && <span className="pt-1">{msg.status === 'read' ? <CheckCheck size={13} className="text-[#53bdeb]" /> : msg.status === 'delivered' ? <CheckCheck size={13} className="text-[#8696a0]" /> : <Check size={13} className="text-[#667781]" />}</span>}
                             </div>
                           </div>
                         </div>
@@ -1061,110 +1205,53 @@ export default function WhatsAppClone() {
                 </div>
 
                 <div className="min-h-[62px] bg-[#f0f2f5] px-4 py-2 flex items-end gap-3 z-10 border-l border-[#e9edef] relative">
-                  
                   {showEmojis && (
                     <div className="absolute bottom-[70px] left-4 bg-white shadow-xl rounded-lg p-3 w-[280px] max-h-[300px] overflow-y-auto border border-[#e9edef] grid grid-cols-6 gap-2 z-50">
-                      {emojis.map(e => (
-                        <button key={e} type="button" className="text-xl hover:bg-gray-100 rounded p-1 transition-colors" onClick={() => {
-                          setInputText(prev => prev + e);
-                        }}>
-                          {e}
-                        </button>
-                      ))}
+                      {emojis.map(e => <button key={e} type="button" className="text-xl hover:bg-gray-100 rounded p-1 transition-colors" onClick={() => setInputText(prev => prev + e)}>{e}</button>)}
                     </div>
                   )}
-
                   <div className="flex items-center gap-3 text-[#54656f] pb-2">
-                    <button type="button" onClick={() => setShowEmojis(!showEmojis)}>
-                      <Smile size={24} className="cursor-pointer hover:text-[#41525d] transition-colors" />
-                    </button>
-                    <button type="button" onClick={() => attachmentRef.current?.click()}>
-                      <Paperclip size={24} className="cursor-pointer hover:text-[#41525d] transition-colors" />
-                    </button>
+                    <button type="button" onClick={() => setShowEmojis(!showEmojis)}><Smile size={24} className="cursor-pointer hover:text-[#41525d] transition-colors" /></button>
+                    <button type="button" onClick={() => attachmentRef.current?.click()}><Paperclip size={24} className="cursor-pointer hover:text-[#41525d] transition-colors" /></button>
                     <input type="file" ref={attachmentRef} onChange={handleFileUpload} className="hidden" />
                   </div>
-                  
                   {isRecording ? (
                     <div className="flex-1 flex items-center justify-between bg-white rounded-lg px-4 py-2.5 h-[44px] mb-[2px] border border-transparent shadow-sm">
-                      <div className="flex items-center gap-3">
-                        <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-                        <span className="text-[#41525d] font-medium tracking-wider">{formatTime(recordingTime)}</span>
-                      </div>
-                      <button type="button" onClick={() => stopRecording(false)} className="text-[#8696a0] hover:text-red-500 transition-colors flex items-center gap-1 text-sm font-medium">
-                        <Trash2 size={18} /> Cancel
-                      </button>
+                      <div className="flex items-center gap-3"><div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div><span className="text-[#41525d] font-medium tracking-wider">{formatTime(recordingTime)}</span></div>
+                      <button type="button" onClick={() => stopRecording(false)} className="text-[#8696a0] hover:text-red-500 transition-colors flex items-center gap-1 text-sm font-medium"><Trash2 size={18} /> Cancel</button>
                     </div>
                   ) : (
                     <form onSubmit={handleSendMessage} className="flex-1 flex items-end bg-white rounded-lg overflow-hidden border border-transparent">
-                      <textarea 
-                        value={inputText}
-                        onChange={(e) => setInputText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSendMessage(e);
-                          }
-                        }}
-                        placeholder="Type a message"
-                        className="w-full max-h-32 px-4 py-2.5 bg-transparent resize-none focus:outline-none text-[#41525d] text-sm md:text-base leading-snug"
-                        rows={1}
-                      />
+                      <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(e); } }} placeholder="Type a message" className="w-full max-h-32 px-4 py-2.5 bg-transparent resize-none focus:outline-none text-[#41525d] text-sm md:text-base leading-snug" rows={1}/>
                     </form>
                   )}
-
                   <div className="text-[#54656f] pb-1.5 flex-shrink-0">
-                    {isRecording ? (
-                      <button onClick={() => stopRecording(true)} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#00a884]">
-                        <Send size={24} />
-                      </button>
-                    ) : inputText.trim() ? (
-                      <button onClick={handleSendMessage} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#54656f]">
-                        <Send size={24} />
-                      </button>
-                    ) : (
-                      <button onClick={startRecording} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#54656f]">
-                        <Mic size={24} />
-                      </button>
-                    )}
+                    {isRecording ? <button onClick={() => stopRecording(true)} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#00a884]"><Send size={24} /></button> : inputText.trim() ? <button onClick={handleSendMessage} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#54656f]"><Send size={24} /></button> : <button onClick={startRecording} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#54656f]"><Mic size={24} /></button>}
                   </div>
                 </div>
                 
-                {}
+                {/* Contact Info Drawer */}
                 <div className={`absolute top-0 right-0 h-full w-full md:w-[350px] lg:w-[400px] bg-[#f0f2f5] z-50 transition-transform duration-300 ease-in-out border-l border-[#e9edef] shadow-2xl flex flex-col ${showContactInfo ? 'translate-x-0' : 'translate-x-full'}`}>
                   <div className="h-[60px] bg-[#f0f2f5] flex items-center px-6 text-[#54656f] gap-6 shrink-0 border-b border-[#e9edef]">
-                    <button onClick={() => setShowContactInfo(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors">
-                      <ArrowLeft size={24} />
-                    </button>
+                    <button onClick={() => setShowContactInfo(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors"><ArrowLeft size={24} /></button>
                     <h1 className="text-[16px] font-medium text-[#111b21]">{isGroup ? 'Group info' : 'Contact info'}</h1>
                   </div>
                   
                   <div className="flex-1 overflow-y-auto pb-8">
                     <div className="bg-white flex flex-col items-center py-8 shadow-sm mb-2 px-4 text-center relative group">
                       <div className="w-48 h-48 rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center text-white mb-4 shadow-md relative">
-                        {activeProfile?.photo ? (
-                          <img src={activeProfile.photo} alt="Profile" className="w-full h-full object-cover" />
-                        ) : (
-                          <User size={80} className="text-[#a6b0b5]" />
-                        )}
+                        {activeProfile?.photo ? <img src={activeProfile.photo} alt="Profile" className="w-full h-full object-cover" /> : <User size={80} className="text-[#a6b0b5]" />}
                         {isAdmin && (
                           <div className="absolute inset-0 bg-black/50 hidden group-hover:flex flex-col items-center justify-center cursor-pointer transition-all" onClick={() => groupPhotoRef.current?.click()}>
-                            <Camera size={32} />
-                            <span className="text-sm mt-1">Change</span>
+                            <Camera size={32} /><span className="text-sm mt-1">Change</span>
                           </div>
                         )}
                       </div>
                       <input type="file" ref={groupPhotoRef} className="hidden" accept="image/*" onChange={handleGroupPhotoUpload} />
                       
                       <div className="flex items-center gap-2">
-                        <input 
-                          value={editGroupName !== '' ? editGroupName : (activeProfile?.displayName || activeChat)}
-                          onChange={e => setEditGroupName(e.target.value)}
-                          disabled={!isAdmin}
-                          className={`text-2xl font-normal text-[#111b21] mb-1 text-center bg-transparent ${isAdmin ? 'border-b border-[#00a884] focus:outline-none' : ''}`}
-                        />
-                        {isAdmin && editGroupName && (
-                          <button onClick={saveGroupName} className="text-[#00a884] hover:bg-gray-100 p-1 rounded-full"><Check size={20}/></button>
-                        )}
+                        <input value={editGroupName !== '' ? editGroupName : (activeProfile?.displayName || activeChat)} onChange={e => setEditGroupName(e.target.value)} disabled={!isAdmin} className={`text-2xl font-normal text-[#111b21] mb-1 text-center bg-transparent ${isAdmin ? 'border-b border-[#00a884] focus:outline-none' : ''}`} />
+                        {isAdmin && editGroupName && <button onClick={saveGroupName} className="text-[#00a884] hover:bg-gray-100 p-1 rounded-full"><Check size={20}/></button>}
                       </div>
                       <p className="text-[#667781] text-lg">{isGroup ? `Group · ${activeProfile?.groupMembers?.length || 0} participants` : (activeProfile?.contact || '~')}</p>
                     </div>
@@ -1180,48 +1267,28 @@ export default function WhatsAppClone() {
                       <div className="bg-white shadow-sm mb-2 pt-4 pb-2">
                         <div className="flex items-center justify-between px-6 mb-3">
                            <p className="text-[#667781] text-sm font-medium">{activeProfile?.groupMembers?.length || 0} participants</p>
-                           {isAdmin && (
-                             <button onClick={() => setShowAddParticipant(!showAddParticipant)} className="text-[#00a884] text-sm font-medium flex items-center gap-1 hover:underline">
-                               <UserPlus size={16}/> Add
-                             </button>
-                           )}
+                           {isAdmin && <button onClick={() => setShowAddParticipant(!showAddParticipant)} className="text-[#00a884] text-sm font-medium flex items-center gap-1 hover:underline"><UserPlus size={16}/> Add</button>}
                         </div>
-
                         {showAddParticipant && isAdmin && (
                           <form onSubmit={handleAddParticipant} className="px-6 mb-4 flex gap-2">
-                             <input 
-                               value={newParticipant} 
-                               onChange={e => setNewParticipant(e.target.value)} 
-                               placeholder="Username" 
-                               className="flex-1 bg-[#f0f2f5] px-3 py-2 rounded-lg text-sm focus:outline-none"
-                             />
+                             <input value={newParticipant} onChange={e => setNewParticipant(e.target.value)} placeholder="Username" className="flex-1 bg-[#f0f2f5] px-3 py-2 rounded-lg text-sm focus:outline-none" />
                              <button type="submit" className="bg-[#00a884] text-white px-3 py-2 rounded-lg text-sm font-medium">Add</button>
                           </form>
                         )}
-
                         {activeProfile?.groupMembers?.map(member => (
                           <div key={member.username} className="flex items-center justify-between px-6 py-3 hover:bg-[#f5f6f6] transition-colors group">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 bg-[#dfe5e7] rounded-full overflow-hidden">
-                                {member.profile_photo ? (
-                                  <img src={member.profile_photo} alt="P" className="w-full h-full object-cover" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-white bg-[#a6b0b5] font-medium uppercase">{member.display_name?.charAt(0) || member.username.charAt(0)}</div>
-                                )}
+                                {member.profile_photo ? <img src={member.profile_photo} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-white bg-[#a6b0b5] font-medium uppercase">{member.display_name?.charAt(0) || member.username.charAt(0)}</div>}
                               </div>
                               <div className="flex flex-col">
                                 <span className="text-[#111b21]">{member.username === currentUser ? 'You' : (member.display_name || member.username)}</span>
                                 {member.role === 'admin' && <span className="text-xs text-[#00a884] border border-[#00a884] rounded px-1 w-fit mt-0.5">Admin</span>}
                               </div>
                             </div>
-                            
                             {isAdmin && member.username !== currentUser && (
                               <div className="hidden group-hover:flex gap-2">
-                                {member.role !== 'admin' ? (
-                                  <button onClick={() => handleGroupAction(member.username, 'admin')} title="Make Admin" className="p-1.5 text-gray-500 hover:text-[#00a884] bg-gray-100 rounded-full"><Shield size={16} /></button>
-                                ) : (
-                                  <button onClick={() => handleGroupAction(member.username, 'member')} title="Remove Admin" className="p-1.5 text-gray-500 hover:text-orange-500 bg-gray-100 rounded-full"><ShieldAlert size={16} /></button>
-                                )}
+                                {member.role !== 'admin' ? <button onClick={() => handleGroupAction(member.username, 'admin')} title="Make Admin" className="p-1.5 text-gray-500 hover:text-[#00a884] bg-gray-100 rounded-full"><Shield size={16} /></button> : <button onClick={() => handleGroupAction(member.username, 'member')} title="Remove Admin" className="p-1.5 text-gray-500 hover:text-orange-500 bg-gray-100 rounded-full"><ShieldAlert size={16} /></button>}
                                 <button onClick={() => handleGroupAction(member.username, 'remove')} title="Remove User" className="p-1.5 text-gray-500 hover:text-red-500 bg-gray-100 rounded-full"><UserMinus size={16} /></button>
                               </div>
                             )}
@@ -1236,11 +1303,9 @@ export default function WhatsAppClone() {
                     </button>
                   </div>
                 </div>
-
               </>
             )}
           </div>
-
         </div>
       </div>
     </div>

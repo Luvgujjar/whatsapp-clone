@@ -10,12 +10,16 @@ export async function GET(request) {
   if (!username) return NextResponse.json({ error: 'Username required' }, { status: 400 });
 
   try {
-    // Intercept requests for Group Profiles
+    // Handling Group Profiles
     if (username.startsWith('#group_')) {
+      // Failsafe: Ensure tables exist
+      await db.execute(`CREATE TABLE IF NOT EXISTS groups (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_by TEXT NOT NULL, timestamp INTEGER NOT NULL, profile_photo TEXT)`);
+      await db.execute(`CREATE TABLE IF NOT EXISTS group_members (group_id TEXT NOT NULL, username TEXT NOT NULL, role TEXT DEFAULT 'member', PRIMARY KEY (group_id, username))`);
+
       const groupRes = await db.execute({ sql: 'SELECT name, profile_photo FROM groups WHERE id = ?', args: [username] });
+      
       if (groupRes.rows.length > 0) {
-        
-        // Fetch members with their roles and user profile data
+        // Fetch all members of this group
         const membersRes = await db.execute({ 
           sql: `SELECT gm.username, gm.role, u.display_name, u.profile_photo 
                 FROM group_members gm 
@@ -33,54 +37,25 @@ export async function GET(request) {
           contact: `Group Members: ${membersStr}`, 
           last_seen: 0,
           isGroup: true,
-          groupMembers: membersRes.rows // Send structured array for admin controls
+          groupMembers: membersRes.rows 
         });
       }
-      return NextResponse.json({});
+      return NextResponse.json({ error: 'Group not found' }, { status: 404 });
     }
 
+    // Handling Normal User Profiles
     const result = await db.execute({
       sql: 'SELECT username, contact, display_name, profile_photo, last_seen FROM users WHERE username = ?',
       args: [username]
     });
-    return NextResponse.json(result.rows[0] || {});
+
+    if (result.rows.length > 0) {
+      return NextResponse.json(result.rows[0]);
+    }
+    
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
   } catch (error) {
     console.error("Profile GET Error:", error);
-    return NextResponse.json({ error: 'Database error' }, { status: 500 });
-  }
-}
-
-export async function PUT(request) {
-  try {
-    const { username, display_name, password, profile_photo } = await request.json();
-    
-    let updates = [];
-    let params = [];
-    
-    if (display_name !== undefined) {
-      updates.push('display_name = ?');
-      params.push(display_name);
-    }
-    if (password) {
-      updates.push('password = ?');
-      params.push(password);
-    }
-    if (profile_photo !== undefined) {
-      updates.push('profile_photo = ?');
-      params.push(profile_photo);
-    }
-
-    if (updates.length > 0) {
-      params.push(username);
-      await db.execute({
-        sql: `UPDATE users SET ${updates.join(', ')} WHERE username = ?`,
-        args: params
-      });
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Profile PUT Error:", error);
-    return NextResponse.json({ error: 'Failed to update profile' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Database error' }, { status: 500 });
   }
 }
