@@ -21,18 +21,18 @@ export async function GET(request) {
               (sender = ? AND receiver NOT LIKE '#group_%') 
               OR receiver = ? 
               OR receiver IN (SELECT group_id FROM group_members WHERE username = ?)
-            ) AND timestamp > ? ORDER BY timestamp ASC`,
+            ) AND COALESCE(updated_at, timestamp) > ? ORDER BY timestamp ASC`,
       args: [user, user, user, after]
     });
 
     if (result.rows.length === 0) {
-      return new NextResponse(null, { status: 204 }); // 204 No Content
+      return new NextResponse(null, { status: 204 }); 
     }
 
     await db.execute({
-      sql: `UPDATE messages SET status = 'delivered' 
-            WHERE receiver = ? AND status = 'sent' AND timestamp > ?`,
-      args: [user, after]
+      sql: `UPDATE messages SET status = 'delivered', updated_at = ? 
+            WHERE receiver = ? AND status = 'sent' AND COALESCE(updated_at, timestamp) > ?`,
+      args: [Date.now(), user, after]
     }).catch(() => {});
 
     return NextResponse.json(result.rows);

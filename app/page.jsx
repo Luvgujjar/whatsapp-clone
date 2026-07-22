@@ -5,7 +5,8 @@ import {
   Smile, Mic, Send, Check, CheckCheck, User, 
   Phone, Video, ArrowLeft, Camera, Save, Trash2,
   Plus, Shield, ShieldAlert, UserMinus, UserPlus, LogOut,
-  CircleDashed, X, Settings, Eye, ChevronUp, ChevronDown
+  CircleDashed, X, Settings, Eye, ChevronUp, ChevronDown,
+  Moon, Sun, Image as ImageIcon, CornerUpLeft
 } from 'lucide-react';
 
 export default function WhatsAppClone() {
@@ -20,6 +21,14 @@ export default function WhatsAppClone() {
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Theme & Wallpapers
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [wallpapers, setWallpapers] = useState({});
+  const customWallpaperRef = useRef(null);
+
+  // Replies
+  const [replyingTo, setReplyingTo] = useState(null);
+
   // Tab Management
   const [activeTab, setActiveTab] = useState('chats');
   const [statuses, setStatuses] = useState([]);
@@ -74,6 +83,37 @@ export default function WhatsAppClone() {
   const lastSyncRef = useRef(0);
   const messagesEndRef = useRef(null);
 
+  // Load Preferences
+  useEffect(() => {
+    const savedDark = localStorage.getItem('whatsapp_dark') === 'true';
+    setIsDarkMode(savedDark);
+    if (savedDark) document.documentElement.classList.add('dark');
+    
+    const savedWallpapers = JSON.parse(localStorage.getItem('whatsapp_wallpapers') || '{}');
+    setWallpapers(savedWallpapers);
+  }, []);
+
+  const toggleDarkMode = () => {
+    const newDark = !isDarkMode;
+    setIsDarkMode(newDark);
+    localStorage.setItem('whatsapp_dark', newDark);
+    if (newDark) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+  };
+
+  const handleCustomWallpaperUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file || !activeChat) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result;
+      const newWallpapers = { ...wallpapers, [activeChat]: base64 };
+      setWallpapers(newWallpapers);
+      localStorage.setItem('whatsapp_wallpapers', JSON.stringify(newWallpapers));
+    };
+    reader.readAsDataURL(file);
+  };
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, activeChat]);
@@ -99,7 +139,6 @@ export default function WhatsAppClone() {
     
     if (!currentStatus) return;
 
-    // View Tracking Logic
     if (viewingStatusUser !== currentUser) {
        fetch('/api/statuses/views', {
          method: 'POST',
@@ -113,7 +152,6 @@ export default function WhatsAppClone() {
          .catch(()=>{});
     }
 
-    // Auto-Advance Timer (Pauses if viewers list is open)
     if (showViewersList) return;
 
     const timer = setInterval(() => {
@@ -127,7 +165,7 @@ export default function WhatsAppClone() {
              return 0;
            }
         }
-        return prev + 2; // 5 seconds per status (2% per 100ms)
+        return prev + 2; 
       });
     }, 100);
     
@@ -184,13 +222,14 @@ export default function WhatsAppClone() {
   useEffect(() => {
     if (isLogged) {
       fetch(`/api/profile?username=${encodeURIComponent(currentUser)}`)
-        .then(res => { if (!res.ok) throw new Error(); return res.json(); })
-        .then(data => {
-          setUserProfile({
-            displayName: data.display_name || currentUser,
-            photo: data.profile_photo || ''
-          });
-          setEditName(data.display_name || currentUser);
+        .then(async res => {
+           if (!res.ok) throw new Error(); 
+           const data = await res.json();
+           setUserProfile({
+             displayName: data.display_name || currentUser,
+             photo: data.profile_photo || ''
+           });
+           setEditName(data.display_name || currentUser);
         }).catch(()=>{});
 
       fetch(`/api/statuses/privacy?username=${encodeURIComponent(currentUser)}`)
@@ -214,7 +253,6 @@ export default function WhatsAppClone() {
     lastSyncRef.current = 0; 
   };
 
-  // Main background polling engine
   useEffect(() => {
     if (!isLogged) return;
     let isMounted = true;
@@ -223,10 +261,9 @@ export default function WhatsAppClone() {
       try {
         const res = await fetch(`/api/sync?user=${encodeURIComponent(currentUser)}&after=${lastSyncRef.current}`);
         
-        // Refresh active chat profile silently to detect new members/name changes
         if (activeChat && isMounted) {
             fetch(`/api/profile?username=${encodeURIComponent(activeChat)}`)
-              .then(async r => { if (!r.ok) throw new Error(await r.text()); return r.json(); })
+              .then(async r => { if (!r.ok) throw new Error(); return r.json(); })
               .then(data => {
                   if (isMounted && !data.error) {
                       setContactProfiles(prev => ({
@@ -256,13 +293,16 @@ export default function WhatsAppClone() {
 
         const newMsgs = await res.json();
         if (newMsgs && newMsgs.length > 0) {
-          const maxTimestamp = Math.max(...newMsgs.map(m => m.timestamp));
-          lastSyncRef.current = maxTimestamp;
+          const maxTimestamp = Math.max(...newMsgs.map(m => m.updated_at || m.timestamp));
+          if (maxTimestamp > lastSyncRef.current) {
+             lastSyncRef.current = maxTimestamp;
+          }
           
           setMessages(prev => {
-            const existingIds = new Set(prev.map(m => m.id));
-            const uniqueNew = newMsgs.filter(m => !existingIds.has(m.id));
-            return [...prev, ...uniqueNew].sort((a, b) => a.timestamp - b.timestamp);
+            // MERGE FIX: Instead of ignoring existing messages, we overwrite them with the deleted/read updates!
+            const map = new Map(prev.map(m => [m.id, m]));
+            newMsgs.forEach(m => map.set(m.id, m));
+            return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
           });
         }
       } catch (err) {}
@@ -330,7 +370,7 @@ export default function WhatsAppClone() {
                 if(data.id) setStatuses(prev => [...prev, data]);
               } else {
                 const errData = await res.json().catch(()=>({}));
-                setStatusError(`Video Error: ${errData.error || 'Too large for server'}`);
+                setStatusError(`Video Error: ${errData.error || 'Server error'}`);
                 setTimeout(() => setStatusError(''), 5000);
               }
             } catch(err) {
@@ -436,19 +476,27 @@ export default function WhatsAppClone() {
     e?.preventDefault();
     if (!inputText.trim() || !activeChat) return;
     const textToSend = inputText.trim();
+    
+    const currentReply = replyingTo;
+    
     setInputText('');
     setShowEmojis(false);
-    sendPayload(textToSend, 'text', null);
+    setReplyingTo(null);
+    sendPayload(textToSend, 'text', null, currentReply?.sender, currentReply?.text);
   };
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file || !activeChat) return;
+    
+    const currentReply = replyingTo;
+    setReplyingTo(null);
+
     const reader = new FileReader();
     reader.onloadend = async () => {
       const base64 = reader.result;
       const fileType = file.type.startsWith('image/') ? 'image' : 'document';
-      sendPayload(file.name, fileType, base64);
+      sendPayload(file.name, fileType, base64, currentReply?.sender, currentReply?.text);
     };
     reader.readAsDataURL(file);
     e.target.value = ''; 
@@ -469,11 +517,15 @@ export default function WhatsAppClone() {
       mediaRecorder.onstop = async () => {
         stream.getTracks().forEach(track => track.stop()); 
         if (isCancelledRef.current) return; 
+        
+        const currentReply = replyingTo;
+        setReplyingTo(null);
+
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = async () => {
-          sendPayload('Voice Message', 'audio', reader.result);
+          sendPayload('Voice Message', 'audio', reader.result, currentReply?.sender, currentReply?.text);
         };
       };
 
@@ -501,7 +553,7 @@ export default function WhatsAppClone() {
     return `${m}:${s}`;
   };
 
-  const sendPayload = async (text, type, media) => {
+  const sendPayload = async (text, type, media, replyToSender = null, replyToText = null) => {
     const optimisticMsg = {
       id: `temp_${Date.now()}`,
       sender: currentUser,
@@ -509,9 +561,13 @@ export default function WhatsAppClone() {
       text: text,
       type: type,
       media: media,
+      reply_to_sender: replyToSender,
+      reply_to_text: replyToText,
       timestamp: Date.now(),
+      updated_at: Date.now(),
       status: 'sending',
-      pending: true
+      pending: true,
+      is_deleted: 0
     };
     setMessages(prev => [...prev, optimisticMsg]);
     lastSyncRef.current = optimisticMsg.timestamp;
@@ -520,13 +576,24 @@ export default function WhatsAppClone() {
       const res = await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sender: currentUser, receiver: activeChat, text: text, type: type, media: media })
+        body: JSON.stringify({ sender: currentUser, receiver: activeChat, text, type, media, replyToSender, replyToText })
       });
       if (res.ok) {
          const savedMsg = await res.json();
          setMessages(prev => prev.map(m => m.id === optimisticMsg.id ? savedMsg : m));
       }
     } catch (error) {}
+  };
+
+  const handleDeleteMessage = async (msgId) => {
+    try {
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, is_deleted: 1, text: '🚫 This message was deleted', media: null, type: 'deleted', updated_at: Date.now() } : m));
+      await fetch('/api/messages', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: msgId, sender: currentUser })
+      });
+    } catch (e) { console.error(e); }
   };
 
   const conversations = React.useMemo(() => {
@@ -550,9 +617,11 @@ export default function WhatsAppClone() {
     });
 
     let chatList = Array.from(chatMap.entries()).map(([contact, msg]) => {
-      let preview = msg.text;
-      if (msg.type === 'audio') preview = '🎤 Voice Message';
-      if (msg.type === 'image') preview = '📷 Image';
+      let preview = msg.is_deleted ? '🚫 This message was deleted' : msg.text;
+      if (!msg.is_deleted) {
+        if (msg.type === 'audio') preview = '🎤 Voice Message';
+        if (msg.type === 'image') preview = '📷 Image';
+      }
       
       return {
         contact,
@@ -560,7 +629,8 @@ export default function WhatsAppClone() {
         timestamp: msg.timestamp,
         isMyLast: msg.sender === currentUser,
         status: msg.status,
-        unreadCount: msg.unreadCount
+        unreadCount: msg.unreadCount,
+        isDeleted: msg.is_deleted
       };
     });
 
@@ -617,7 +687,6 @@ export default function WhatsAppClone() {
         })
         .catch(err => console.error("Profile Fetch Error", err))
         .finally(() => {
-          // CRITICAL FIX: Delete from fetching map so it can retry if it failed!
           fetchingProfiles.current.delete(contact);
         });
     };
@@ -661,11 +730,7 @@ export default function WhatsAppClone() {
         const res = await fetch('/api/groups', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: finalGroupName,
-            createdBy: currentUser,
-            members: [currentUser, ...targets]
-          })
+          body: JSON.stringify({ name: finalGroupName, createdBy: currentUser, members: [currentUser, ...targets] })
         });
         
         if (!res.ok) {
@@ -675,7 +740,6 @@ export default function WhatsAppClone() {
         
         const data = await res.json();
         if (data.id) {
-          // CRITICAL FIX: Instantly populate the contact profile so UI shows Admin tools immediately
           setContactProfiles(prev => ({
             ...prev,
             [data.id]: {
@@ -684,11 +748,7 @@ export default function WhatsAppClone() {
               contact: `Group Members: ${data.members.join(', ')}`,
               lastSeen: Date.now(),
               isGroup: true,
-              groupMembers: data.members.map(m => ({ 
-                username: m, 
-                display_name: m,
-                role: m === currentUser ? 'admin' : 'member' 
-              }))
+              groupMembers: data.members.map(m => ({ username: m, display_name: m, role: m === currentUser ? 'admin' : 'member' }))
             }
           }));
 
@@ -800,31 +860,36 @@ export default function WhatsAppClone() {
     };
 
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f0f2f5] font-sans p-4">
-        <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
+      <div className={`min-h-screen flex items-center justify-center bg-[#f0f2f5] dark:bg-[#111b21] font-sans p-4 ${isDarkMode ? 'dark' : ''}`}>
+        <div className="absolute top-4 right-4">
+          <button onClick={toggleDarkMode} className="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-gray-600 dark:text-gray-300 transition-colors">
+            {isDarkMode ? <Sun size={24} /> : <Moon size={24} />}
+          </button>
+        </div>
+        <div className="bg-white dark:bg-[#202c33] p-8 rounded-xl shadow-lg w-full max-w-md border dark:border-[#222d34]">
           <div className="flex flex-col items-center justify-center mb-8">
             <div className="text-[#25D366] mb-4"><MessageSquare size={56} /></div>
-            <h1 className="text-2xl font-medium text-[#111b21]">{authMode === 'signin' ? 'Sign in to WhatsApp' : 'Create an account'}</h1>
+            <h1 className="text-2xl font-medium text-[#111b21] dark:text-[#e9edef]">{authMode === 'signin' ? 'Sign in to WhatsApp' : 'Create an account'}</h1>
           </div>
-          {authError && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-sm text-center">{authError}</div>}
+          {authError && <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 rounded-lg text-sm text-center">{authError}</div>}
           <form onSubmit={handleAuth} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-[#41525d] mb-1">Username</label>
-              <input type="text" autoFocus className="w-full p-3 bg-[#f0f2f5] border border-transparent rounded-lg focus:outline-none focus:bg-white focus:border-[#00a884]" value={currentUser} onChange={e => setCurrentUser(e.target.value.toLowerCase())} required />
+              <label className="block text-sm font-medium text-[#41525d] dark:text-[#8696a0] mb-1">Username</label>
+              <input type="text" autoFocus className="w-full p-3 bg-[#f0f2f5] dark:bg-[#2a3942] border border-transparent text-[#111b21] dark:text-[#e9edef] rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#202c33] focus:border-[#00a884] dark:focus:border-[#00a884]" value={currentUser} onChange={e => setCurrentUser(e.target.value.toLowerCase())} required />
             </div>
             {authMode === 'signup' && (
               <div>
-                <label className="block text-sm font-medium text-[#41525d] mb-1">Email or Phone</label>
-                <input type="text" className="w-full p-3 bg-[#f0f2f5] border border-transparent rounded-lg focus:outline-none focus:bg-white focus:border-[#00a884]" value={emailOrPhone} onChange={e => setEmailOrPhone(e.target.value)} required />
+                <label className="block text-sm font-medium text-[#41525d] dark:text-[#8696a0] mb-1">Email or Phone</label>
+                <input type="text" className="w-full p-3 bg-[#f0f2f5] dark:bg-[#2a3942] border border-transparent text-[#111b21] dark:text-[#e9edef] rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#202c33] focus:border-[#00a884]" value={emailOrPhone} onChange={e => setEmailOrPhone(e.target.value)} required />
               </div>
             )}
             <div>
-              <label className="block text-sm font-medium text-[#41525d] mb-1">Password</label>
-              <input type="password" className="w-full p-3 bg-[#f0f2f5] border border-transparent rounded-lg focus:outline-none focus:bg-white focus:border-[#00a884]" value={password} onChange={e => setPassword(e.target.value)} required />
+              <label className="block text-sm font-medium text-[#41525d] dark:text-[#8696a0] mb-1">Password</label>
+              <input type="password" className="w-full p-3 bg-[#f0f2f5] dark:bg-[#2a3942] border border-transparent text-[#111b21] dark:text-[#e9edef] rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#202c33] focus:border-[#00a884]" value={password} onChange={e => setPassword(e.target.value)} required />
             </div>
             <button type="submit" className="w-full bg-[#00a884] hover:bg-[#017561] text-white p-3 rounded-lg font-medium transition-colors mt-6">{authMode === 'signin' ? 'Sign In' : 'Sign Up'}</button>
           </form>
-          <div className="mt-6 text-center text-sm text-[#54656f]">
+          <div className="mt-6 text-center text-sm text-[#54656f] dark:text-[#8696a0]">
             {authMode === 'signin' ? <p>Don't have an account? <button type="button" onClick={() => { setAuthMode('signup'); setPassword(''); setEmailOrPhone(''); setAuthError(''); }} className="text-[#00a884] font-medium hover:underline">Sign up</button></p> : <p>Already have an account? <button type="button" onClick={() => { setAuthMode('signin'); setPassword(''); setAuthError(''); }} className="text-[#00a884] font-medium hover:underline">Sign in</button></p>}
           </div>
         </div>
@@ -841,56 +906,67 @@ export default function WhatsAppClone() {
   const myStatuses = groupedStatuses[currentUser] || [];
 
   return (
-    <div className="flex h-screen w-full bg-[#d1d7db] font-sans overflow-hidden">
+    <div className={`flex h-screen w-full bg-[#d1d7db] dark:bg-[#0a1014] font-sans overflow-hidden ${isDarkMode ? 'dark' : ''}`}>
       <div className="flex w-full h-full max-w-[1600px] mx-auto md:py-4 md:px-4 shadow-xl">
-        <div className="flex w-full h-full bg-white md:rounded-lg overflow-hidden shadow-sm relative">
+        <div className="flex w-full h-full bg-white dark:bg-[#111b21] md:rounded-lg overflow-hidden shadow-sm relative border dark:border-[#222d34]">
           
           {/* Sidebar */}
-          <div className={`flex flex-col w-full md:w-[350px] lg:w-[400px] border-r border-[#e9edef] transition-all duration-300 ${activeChat || viewingStatusUser ? 'hidden md:flex' : 'flex'} relative overflow-hidden`}>
+          <div className={`flex flex-col w-full md:w-[350px] lg:w-[400px] border-r border-[#e9edef] dark:border-[#222d34] transition-all duration-300 ${activeChat || viewingStatusUser ? 'hidden md:flex' : 'flex'} relative overflow-hidden`}>
             
             {/* Profile Drawer */}
-            <div className={`absolute inset-0 bg-[#f0f2f5] z-50 flex flex-col transition-transform duration-300 ease-in-out ${showProfile ? 'translate-x-0' : '-translate-x-full'}`}>
+            <div className={`absolute inset-0 bg-[#f0f2f5] dark:bg-[#111b21] z-50 flex flex-col transition-transform duration-300 ease-in-out ${showProfile ? 'translate-x-0' : '-translate-x-full'}`}>
               <div className="h-[108px] bg-[#008069] flex items-end pb-4 px-6 text-white gap-6 shrink-0 shadow-sm">
                 <button onClick={() => setShowProfile(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors"><ArrowLeft size={24} /></button>
                 <h1 className="text-[19px] font-medium">Profile</h1>
               </div>
               <div className="flex-1 overflow-y-auto">
                 <div className="flex justify-center py-7">
-                  <div className="relative group cursor-pointer w-48 h-48 rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center text-white shadow-sm" onClick={() => fileInputRef.current?.click()}>
-                    {userProfile.photo ? <img src={userProfile.photo} className="w-full h-full object-cover" /> : <User size={80} className="text-[#a6b0b5]" />}
+                  <div className="relative group cursor-pointer w-48 h-48 rounded-full overflow-hidden bg-[#dfe5e7] dark:bg-[#202c33] flex items-center justify-center text-white shadow-sm" onClick={() => fileInputRef.current?.click()}>
+                    {userProfile.photo ? <img src={userProfile.photo} className="w-full h-full object-cover" /> : <User size={80} className="text-[#a6b0b5] dark:text-[#8696a0]" />}
                     <div className="absolute inset-0 bg-black/50 hidden group-hover:flex flex-col items-center justify-center text-white text-sm text-center transition-all"><Camera size={24} className="mb-2" /><span className="w-24 leading-tight uppercase font-medium">Change Photo</span></div>
                   </div>
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handlePhotoUpload} />
                 </div>
-                <div className="bg-white px-7 py-3 mb-4 shadow-sm">
+                <div className="bg-white dark:bg-[#202c33] px-7 py-3 mb-4 shadow-sm">
                   <p className="text-[#008069] text-[14px] mb-4">Your name</p>
                   <div className="flex justify-between items-center border-b border-[#008069] pb-2">
-                    <input value={editName} onChange={e => setEditName(e.target.value)} className="w-full focus:outline-none text-[#111b21] bg-transparent" />
-                    <button onClick={() => { saveProfile({ display_name: editName }); setUserProfile(prev => ({...prev, displayName: editName})); }} className="p-1 hover:bg-gray-100 rounded-full"><Save size={20} className="text-[#8696a0]" /></button>
+                    <input value={editName} onChange={e => setEditName(e.target.value)} className="w-full focus:outline-none text-[#111b21] dark:text-[#e9edef] bg-transparent" />
+                    <button onClick={() => { saveProfile({ display_name: editName }); setUserProfile(prev => ({...prev, displayName: editName})); }} className="p-1 hover:bg-gray-100 dark:hover:bg-[#2a3942] rounded-full"><Save size={20} className="text-[#8696a0]" /></button>
                   </div>
                 </div>
+                
+                <div className="bg-white dark:bg-[#202c33] px-7 py-4 shadow-sm border-t border-[#e9edef] dark:border-[#222d34] cursor-pointer hover:bg-gray-50 dark:hover:bg-[#2a3942] transition-colors flex items-center justify-between" onClick={toggleDarkMode}>
+                   <div className="flex items-center gap-4 text-[#111b21] dark:text-[#e9edef]">
+                     {isDarkMode ? <Moon size={24} className="text-[#8696a0]"/> : <Sun size={24} className="text-[#8696a0]"/>}
+                     <span className="text-lg">Dark Theme</span>
+                   </div>
+                   <div className={`w-10 h-5 rounded-full relative transition-colors ${isDarkMode ? 'bg-[#00a884]' : 'bg-gray-300'}`}>
+                      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${isDarkMode ? 'left-[22px]' : 'left-1'}`}></div>
+                   </div>
+                </div>
+
               </div>
             </div>
 
             {/* Privacy Drawer */}
-            <div className={`absolute inset-0 bg-[#f0f2f5] z-50 flex flex-col transition-transform duration-300 ease-in-out ${showStatusPrivacy ? 'translate-x-0' : '-translate-x-full'}`}>
+            <div className={`absolute inset-0 bg-[#f0f2f5] dark:bg-[#111b21] z-50 flex flex-col transition-transform duration-300 ease-in-out ${showStatusPrivacy ? 'translate-x-0' : '-translate-x-full'}`}>
               <div className="h-[108px] bg-[#008069] flex items-end pb-4 px-6 text-white gap-6 shrink-0 shadow-sm">
                 <button onClick={() => setShowStatusPrivacy(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors"><ArrowLeft size={24} /></button>
                 <h1 className="text-[19px] font-medium">Status Privacy</h1>
               </div>
-              <div className="flex-1 overflow-y-auto bg-white p-6">
-                <p className="text-[#667781] text-sm mb-6">Hide my status updates from specific contacts:</p>
+              <div className="flex-1 overflow-y-auto bg-white dark:bg-[#202c33] p-6">
+                <p className="text-[#667781] dark:text-[#8696a0] text-sm mb-6">Hide my status updates from specific contacts:</p>
                 {knownContacts.length === 0 ? (
-                  <p className="text-[#a6b0b5] text-sm text-center">No contacts yet. Start chatting first!</p>
+                  <p className="text-[#a6b0b5] dark:text-[#8696a0] text-sm text-center">No contacts yet. Start chatting first!</p>
                 ) : (
                   <div className="flex flex-col gap-4">
                     {knownContacts.map(contact => (
-                      <label key={contact} className="flex items-center gap-4 cursor-pointer p-2 hover:bg-[#f5f6f6] rounded-lg">
+                      <label key={contact} className="flex items-center gap-4 cursor-pointer p-2 hover:bg-[#f5f6f6] dark:hover:bg-[#2a3942] rounded-lg">
                         <input type="checkbox" checked={hiddenUsers.includes(contact)} onChange={(e) => setHiddenUsers(prev => e.target.checked ? [...prev, contact] : prev.filter(u => u !== contact))} className="w-5 h-5 accent-[#00a884] rounded border-gray-300" />
-                        <div className="w-10 h-10 bg-[#dfe5e7] rounded-full overflow-hidden flex-shrink-0">
+                        <div className="w-10 h-10 bg-[#dfe5e7] dark:bg-[#6a7175] rounded-full overflow-hidden flex-shrink-0">
                            {contactProfiles[contact]?.photo ? <img src={contactProfiles[contact].photo} className="w-full h-full object-cover"/> : <User className="text-white w-full h-full p-2"/>}
                         </div>
-                        <span className="text-[#111b21] font-medium">{contactProfiles[contact]?.displayName || contact}</span>
+                        <span className="text-[#111b21] dark:text-[#e9edef] font-medium">{contactProfiles[contact]?.displayName || contact}</span>
                       </label>
                     ))}
                     <button onClick={saveStatusPrivacy} className="w-full bg-[#00a884] hover:bg-[#017561] text-white p-3 rounded-lg font-medium transition-colors mt-4 shadow-sm">Save Settings</button>
@@ -900,21 +976,21 @@ export default function WhatsAppClone() {
             </div>
 
             {/* Sidebar Navigation */}
-            <div className="h-[60px] bg-[#f0f2f5] flex items-center justify-between px-4 flex-shrink-0">
+            <div className="h-[60px] bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 flex-shrink-0 border-b dark:border-[#222d34]">
               <div className="flex items-center gap-3 cursor-pointer" onClick={() => setShowProfile(true)}>
-                <div className="w-10 h-10 bg-[#dfe5e7] rounded-full flex items-center justify-center text-white overflow-hidden hover:opacity-80 transition-opacity">
-                  {userProfile.photo ? <img src={userProfile.photo} className="w-full h-full object-cover" /> : <User size={24} className="text-[#a6b0b5]" />}
+                <div className="w-10 h-10 bg-[#dfe5e7] dark:bg-[#6a7175] rounded-full flex items-center justify-center text-white overflow-hidden hover:opacity-80 transition-opacity">
+                  {userProfile.photo ? <img src={userProfile.photo} className="w-full h-full object-cover" /> : <User size={24} className="text-[#a6b0b5] dark:text-white" />}
                 </div>
               </div>
-              <div className="flex items-center gap-2 text-[#54656f]">
-                <button onClick={() => { setActiveTab(activeTab === 'chats' ? 'status' : 'chats'); setNewChatPrompt(false); }} className={`p-2 rounded-full transition-colors ${activeTab === 'status' ? 'bg-[#d9d9d9] text-[#111b21]' : 'hover:bg-[#d9d9d9]'}`}><CircleDashed size={20} /></button>
-                <button onClick={() => { setNewChatPrompt(!newChatPrompt); setNewChatError(''); setActiveTab('chats'); }} className={`p-2 rounded-full transition-colors ${newChatPrompt ? 'bg-[#d9d9d9]' : 'hover:bg-[#d9d9d9]'}`}><Plus size={20} /></button>
+              <div className="flex items-center gap-2 text-[#54656f] dark:text-[#aebac1]">
+                <button onClick={() => { setActiveTab(activeTab === 'chats' ? 'status' : 'chats'); setNewChatPrompt(false); }} className={`p-2 rounded-full transition-colors ${activeTab === 'status' ? 'bg-[#d9d9d9] dark:bg-[#374248] text-[#111b21] dark:text-white' : 'hover:bg-[#d9d9d9] dark:hover:bg-[#374248]'}`}><CircleDashed size={20} /></button>
+                <button onClick={() => { setNewChatPrompt(!newChatPrompt); setNewChatError(''); setActiveTab('chats'); }} className={`p-2 rounded-full transition-colors ${newChatPrompt ? 'bg-[#d9d9d9] dark:bg-[#374248]' : 'hover:bg-[#d9d9d9] dark:hover:bg-[#374248]'}`}><Plus size={20} /></button>
                 <div className="relative">
-                  <button onClick={() => setShowMenu(!showMenu)} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors"><MoreVertical size={20} /></button>
+                  <button onClick={() => setShowMenu(!showMenu)} className="p-2 rounded-full hover:bg-[#d9d9d9] dark:hover:bg-[#374248] transition-colors"><MoreVertical size={20} /></button>
                   {showMenu && (
-                    <div className="absolute right-0 top-10 bg-white shadow-lg rounded-md py-2 w-40 z-50 border border-[#e9edef]">
-                      <button onClick={() => { setShowMenu(false); setShowProfile(true); }} className="w-full text-left px-4 py-2 text-sm text-[#41525d] hover:bg-[#f5f6f6]">Profile</button>
-                      <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-sm text-[#41525d] hover:bg-[#f5f6f6]">Log out</button>
+                    <div className="absolute right-0 top-10 bg-white dark:bg-[#2a3942] shadow-lg rounded-md py-2 w-40 z-50 border border-[#e9edef] dark:border-[#222d34]">
+                      <button onClick={() => { setShowMenu(false); setShowProfile(true); }} className="w-full text-left px-4 py-2 text-sm text-[#41525d] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]">Profile</button>
+                      <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-sm text-[#41525d] dark:text-[#d1d7db] hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]">Log out</button>
                     </div>
                   )}
                 </div>
@@ -923,19 +999,19 @@ export default function WhatsAppClone() {
 
             {/* Start New Chat / Group Box */}
             {newChatPrompt && activeTab === 'chats' && (
-              <div className="bg-white p-3 border-b border-[#e9edef] relative z-20">
+              <div className="bg-white dark:bg-[#111b21] p-3 border-b border-[#e9edef] dark:border-[#222d34] relative z-20">
                  <form onSubmit={handleNewChat} className="flex flex-col gap-2">
                     <div className="flex gap-2">
-                      <input value={newChatTargets} onChange={e => setNewChatTargets(e.target.value)} placeholder="Names (comma separated for groups)" className="flex-1 bg-[#f0f2f5] text-[#41525d] px-3 py-2 rounded-lg text-sm focus:outline-none" autoFocus />
+                      <input value={newChatTargets} onChange={e => setNewChatTargets(e.target.value)} placeholder="Names (comma separated for groups)" className="flex-1 bg-[#f0f2f5] dark:bg-[#202c33] text-[#41525d] dark:text-[#d1d7db] px-3 py-2 rounded-lg text-sm focus:outline-none" autoFocus />
                       <button type="submit" className="bg-[#00a884] text-white px-4 py-2 rounded-lg text-sm font-medium">Chat</button>
                     </div>
-                    {newChatTargets.includes(',') && <input value={groupSubject} onChange={e => setGroupSubject(e.target.value)} placeholder="Group Subject (Optional)" className="w-full bg-[#f0f2f5] text-[#41525d] px-3 py-2 rounded-lg text-sm focus:outline-none mt-1" />}
+                    {newChatTargets.includes(',') && <input value={groupSubject} onChange={e => setGroupSubject(e.target.value)} placeholder="Group Subject (Optional)" className="w-full bg-[#f0f2f5] dark:bg-[#202c33] text-[#41525d] dark:text-[#d1d7db] px-3 py-2 rounded-lg text-sm focus:outline-none mt-1" />}
                     {newChatError && <span className="text-red-500 text-xs ml-1 font-medium">{newChatError}</span>}
                  </form>
                  {suggestions.length > 0 && (
-                   <div className="absolute top-[50px] left-3 right-3 bg-white border border-[#e9edef] shadow-lg rounded-lg max-h-48 overflow-y-auto">
+                   <div className="absolute top-[50px] left-3 right-3 bg-white dark:bg-[#2a3942] border border-[#e9edef] dark:border-[#222d34] shadow-lg rounded-lg max-h-48 overflow-y-auto">
                      {suggestions.map(s => (
-                       <div key={s} onClick={() => handleSuggestionClick(s)} className="px-4 py-2 hover:bg-[#f5f6f6] cursor-pointer text-sm text-[#111b21] flex items-center gap-2"><User size={16} className="text-[#8696a0]"/> {s}</div>
+                       <div key={s} onClick={() => handleSuggestionClick(s)} className="px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#202c33] cursor-pointer text-sm text-[#111b21] dark:text-[#e9edef] flex items-center gap-2"><User size={16} className="text-[#8696a0]"/> {s}</div>
                      ))}
                    </div>
                  )}
@@ -944,19 +1020,19 @@ export default function WhatsAppClone() {
 
             {/* Status Tab OR Chat Tab */}
             {activeTab === 'status' ? (
-              <div className="flex-1 overflow-y-auto bg-white flex flex-col">
-                <div className="flex justify-between items-center px-4 py-3 bg-white border-b border-[#e9edef]">
-                   <h2 className="text-[#111b21] font-medium text-lg">Status</h2>
-                   <button onClick={() => setShowStatusPrivacy(true)} title="Privacy Settings" className="text-[#54656f] p-2 hover:bg-[#f5f6f6] rounded-full transition-colors"><Settings size={20}/></button>
+              <div className="flex-1 overflow-y-auto bg-white dark:bg-[#111b21] flex flex-col">
+                <div className="flex justify-between items-center px-4 py-3 bg-white dark:bg-[#111b21] border-b border-[#e9edef] dark:border-[#222d34]">
+                   <h2 className="text-[#111b21] dark:text-[#e9edef] font-medium text-lg">Status</h2>
+                   <button onClick={() => setShowStatusPrivacy(true)} title="Privacy Settings" className="text-[#54656f] dark:text-[#aebac1] p-2 hover:bg-[#f5f6f6] dark:hover:bg-[#202c33] rounded-full transition-colors"><Settings size={20}/></button>
                 </div>
                 
                 {statusError && (
-                  <div className="mx-4 mt-3 bg-red-50 text-red-600 text-sm p-2 rounded border border-red-100 text-center shadow-sm">
+                  <div className="mx-4 mt-3 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-sm p-2 rounded border border-red-100 dark:border-red-900 text-center shadow-sm">
                     {statusError}
                   </div>
                 )}
 
-                <div className="flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6]">
+                <div className="flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]">
                   <div 
                     className={`relative w-12 h-12 rounded-full mr-3 flex items-center justify-center flex-shrink-0 ${myStatuses.length > 0 ? 'border-[3px] border-[#00a884] p-0.5' : ''}`}
                     onClick={(e) => {
@@ -972,7 +1048,7 @@ export default function WhatsAppClone() {
                        }
                     }}
                   >
-                    <div className="w-full h-full rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center relative">
+                    <div className="w-full h-full rounded-full overflow-hidden bg-[#dfe5e7] dark:bg-[#6a7175] flex items-center justify-center relative">
                        {userProfile.photo ? <img src={userProfile.photo} className="w-full h-full object-cover"/> : <User size={24} className="text-white" />}
                        {isUploadingStatus && (
                           <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
@@ -980,64 +1056,64 @@ export default function WhatsAppClone() {
                           </div>
                        )}
                     </div>
-                    <div className="absolute bottom-0 right-[-2px] bg-[#00a884] rounded-full p-0.5 border-2 border-white shadow-sm" onClick={(e) => { e.stopPropagation(); statusUploadRef.current?.click(); }}>
+                    <div className="absolute bottom-0 right-[-2px] bg-[#00a884] rounded-full p-0.5 border-2 border-white dark:border-[#111b21] shadow-sm" onClick={(e) => { e.stopPropagation(); statusUploadRef.current?.click(); }}>
                       <Plus size={14} className="text-white font-bold" />
                     </div>
                   </div>
-                  <div className="flex-1 border-b border-[#f2f2f2] pb-3 pt-1" onClick={() => statusUploadRef.current?.click()}>
-                    <h3 className="text-[#111b21] font-medium text-[16px]">My status</h3>
-                    <p className="text-[#667781] text-[13px]">{isUploadingStatus ? 'Uploading...' : myStatuses.length > 0 ? 'Click avatar to view, text to add' : 'Tap to add status update'}</p>
+                  <div className="flex-1 border-b border-[#f2f2f2] dark:border-[#222d34] pb-3 pt-1" onClick={() => statusUploadRef.current?.click()}>
+                    <h3 className="text-[#111b21] dark:text-[#e9edef] font-medium text-[16px]">My status</h3>
+                    <p className="text-[#667781] dark:text-[#8696a0] text-[13px]">{isUploadingStatus ? 'Uploading...' : myStatuses.length > 0 ? 'Click avatar to view, text to add' : 'Tap to add status update'}</p>
                   </div>
                 </div>
                 <input type="file" accept="image/*,video/*" className="hidden" ref={statusUploadRef} onChange={handleStatusUpload} />
 
-                <div className="px-5 py-3 text-[#008069] text-[14px] bg-white">RECENT UPDATES</div>
-                {Object.keys(groupedStatuses).filter(u => u !== currentUser).length === 0 && <div className="px-5 py-2 text-[#667781] text-sm">No recent updates</div>}
+                <div className="px-5 py-3 text-[#008069] text-[14px] bg-white dark:bg-[#111b21]">RECENT UPDATES</div>
+                {Object.keys(groupedStatuses).filter(u => u !== currentUser).length === 0 && <div className="px-5 py-2 text-[#667781] dark:text-[#8696a0] text-sm">No recent updates</div>}
                 
                 {Object.keys(groupedStatuses).filter(u => u !== currentUser).map(u => (
-                  <div key={u} className="flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6]" onClick={() => { setViewingStatusUser(u); setViewingStatusIndex(0); setStatusProgress(0); setShowViewersList(false); setActiveChat(null); }}>
+                  <div key={u} className="flex items-center px-4 py-3 cursor-pointer hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]" onClick={() => { setViewingStatusUser(u); setViewingStatusIndex(0); setStatusProgress(0); setShowViewersList(false); setActiveChat(null); }}>
                     <div className="relative w-12 h-12 rounded-full mr-3 p-0.5 border-2 border-[#00a884] flex-shrink-0">
-                       <div className="w-full h-full rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center">
+                       <div className="w-full h-full rounded-full overflow-hidden bg-[#dfe5e7] dark:bg-[#6a7175] flex items-center justify-center">
                          {contactProfiles[u]?.photo ? <img src={contactProfiles[u].photo} className="w-full h-full object-cover"/> : <User size={24} className="text-white"/>}
                        </div>
                     </div>
-                    <div className="flex-1 border-b border-[#f2f2f2] pb-3 pt-1">
-                      <h3 className="text-[#111b21] font-normal text-[16px]">{contactProfiles[u]?.displayName || u}</h3>
-                      <p className="text-[#667781] text-[13px]">{new Date(groupedStatuses[u][groupedStatuses[u].length - 1].timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                    <div className="flex-1 border-b border-[#f2f2f2] dark:border-[#222d34] pb-3 pt-1">
+                      <h3 className="text-[#111b21] dark:text-[#e9edef] font-normal text-[16px]">{contactProfiles[u]?.displayName || u}</h3>
+                      <p className="text-[#667781] dark:text-[#8696a0] text-[13px]">{new Date(groupedStatuses[u][groupedStatuses[u].length - 1].timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
               <>
-                <div className="p-2 border-b border-[#e9edef] bg-white">
-                  <div className="bg-[#f0f2f5] rounded-lg flex items-center px-3 h-9">
-                    <Search size={18} className="text-[#54656f]" />
-                    <input type="text" placeholder="Search or start new chat" className="bg-transparent border-none focus:outline-none ml-4 text-sm w-full text-[#41525d] placeholder-[#54656f]" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                <div className="p-2 border-b border-[#e9edef] dark:border-[#222d34] bg-white dark:bg-[#111b21]">
+                  <div className="bg-[#f0f2f5] dark:bg-[#202c33] rounded-lg flex items-center px-3 h-9">
+                    <Search size={18} className="text-[#54656f] dark:text-[#8696a0]" />
+                    <input type="text" placeholder="Search or start new chat" className="bg-transparent border-none focus:outline-none ml-4 text-sm w-full text-[#41525d] dark:text-[#d1d7db] placeholder-[#54656f] dark:placeholder-[#8696a0]" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto bg-white">
+                <div className="flex-1 overflow-y-auto bg-white dark:bg-[#111b21]">
                   {conversations.length === 0 ? (
-                    <div className="text-center p-6 text-[#54656f] text-sm">No conversations yet. Click the + icon to start a chat.</div>
+                    <div className="text-center p-6 text-[#54656f] dark:text-[#8696a0] text-sm">No conversations yet. Click the + icon to start a chat.</div>
                   ) : (
                     conversations.map((chat) => (
-                      <div key={chat.contact} onClick={() => { setActiveChat(chat.contact); setShowContactInfo(false); setViewingStatusUser(null); }} className={`flex items-center px-3 py-2.5 cursor-pointer hover:bg-[#f5f6f6] transition-colors ${activeChat === chat.contact ? 'bg-[#f0f2f5]' : ''}`}>
-                        <div className="w-12 h-12 bg-[#dfe5e7] rounded-full flex items-center justify-center text-white mr-3 flex-shrink-0 overflow-hidden relative">
-                          {contactProfiles[chat.contact]?.photo ? <img src={contactProfiles[chat.contact].photo} alt="Profile" className="w-full h-full object-cover" /> : <span className="font-semibold text-lg text-[#a6b0b5]">{contactProfiles[chat.contact]?.displayName ? contactProfiles[chat.contact].displayName.charAt(0).toUpperCase() : chat.contact.charAt(0).toUpperCase()}</span>}
+                      <div key={chat.contact} onClick={() => { setActiveChat(chat.contact); setShowContactInfo(false); setViewingStatusUser(null); }} className={`flex items-center px-3 py-2.5 cursor-pointer hover:bg-[#f5f6f6] dark:hover:bg-[#202c33] transition-colors ${activeChat === chat.contact ? 'bg-[#f0f2f5] dark:bg-[#2a3942]' : ''}`}>
+                        <div className="w-12 h-12 bg-[#dfe5e7] dark:bg-[#6a7175] rounded-full flex items-center justify-center text-white mr-3 flex-shrink-0 overflow-hidden relative">
+                          {contactProfiles[chat.contact]?.photo ? <img src={contactProfiles[chat.contact].photo} alt="Profile" className="w-full h-full object-cover" /> : <span className="font-semibold text-lg text-[#a6b0b5] dark:text-white">{contactProfiles[chat.contact]?.displayName ? contactProfiles[chat.contact].displayName.charAt(0).toUpperCase() : chat.contact.charAt(0).toUpperCase()}</span>}
                         </div>
-                        <div className="flex-1 min-w-0 border-b border-[#f2f2f2] pb-2 pt-1">
+                        <div className="flex-1 min-w-0 border-b border-[#f2f2f2] dark:border-[#222d34] pb-2 pt-1">
                           <div className="flex justify-between items-baseline mb-0.5">
-                            <span className="font-normal text-base text-[#111b21] truncate flex items-center gap-1.5">
+                            <span className="font-normal text-base text-[#111b21] dark:text-[#e9edef] truncate flex items-center gap-1.5">
                               {contactProfiles[chat.contact]?.displayName || chat.contact}
                               {!chat.contact.startsWith('#group_') && isOnline(contactProfiles[chat.contact]?.lastSeen) && <span className="w-2 h-2 bg-[#25D366] rounded-full shadow-sm"></span>}
                             </span>
-                            <span className={`text-xs ${chat.unreadCount > 0 ? 'text-[#25D366] font-medium' : 'text-[#667781]'}`}>{new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            <span className={`text-xs ${chat.unreadCount > 0 ? 'text-[#25D366] font-medium' : 'text-[#667781] dark:text-[#8696a0]'}`}>{new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                           </div>
-                          <div className="flex items-center justify-between text-sm text-[#667781] w-full">
+                          <div className="flex items-center justify-between text-sm text-[#667781] dark:text-[#8696a0] w-full">
                             <div className="flex items-center truncate">
-                              {chat.isMyLast && <span className="mr-1 flex-shrink-0">{chat.status === 'read' ? <CheckCheck size={14} className="text-[#53bdeb]" /> : chat.status === 'delivered' ? <CheckCheck size={14} className="text-[#8696a0]" /> : <Check size={14} className="text-[#8696a0]" />}</span>}
-                              <span className="truncate">{chat.lastMessage}</span>
+                              {chat.isMyLast && !chat.isDeleted && <span className="mr-1 flex-shrink-0">{chat.status === 'read' ? <CheckCheck size={14} className="text-[#53bdeb]" /> : chat.status === 'delivered' ? <CheckCheck size={14} className="text-[#8696a0]" /> : <Check size={14} className="text-[#8696a0]" />}</span>}
+                              <span className={`truncate ${chat.isDeleted ? 'italic text-sm' : ''}`}>{chat.lastMessage}</span>
                             </div>
                             {chat.unreadCount > 0 && <div className="bg-[#25D366] text-white text-[11px] font-bold px-1.5 py-0.5 min-w-[20px] h-[20px] rounded-full flex items-center justify-center shadow-sm ml-2 flex-shrink-0">{chat.unreadCount}</div>}
                           </div>
@@ -1051,7 +1127,7 @@ export default function WhatsAppClone() {
           </div>
 
           {/* Right Chat Area OR Status Viewer */}
-          <div className={`flex-col flex-1 bg-[#efeae2] relative overflow-hidden ${!activeChat && !viewingStatusUser ? 'hidden md:flex' : 'flex'}`}>
+          <div className={`flex-col flex-1 bg-[#efeae2] dark:bg-[#0b141a] relative overflow-hidden ${!activeChat && !viewingStatusUser ? 'hidden md:flex' : 'flex'}`}>
             
             {viewingStatusUser ? (() => {
               const currentStatus = groupedStatuses[viewingStatusUser][viewingStatusIndex];
@@ -1142,35 +1218,35 @@ export default function WhatsAppClone() {
                  )}
               </div>
             )})() : !activeChat ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-[#f0f2f5] border-l border-[#e9edef]">
-                <h2 className="text-[32px] text-[#41525d] font-light mb-4">WhatsApp Web Clone</h2>
-                <p className="text-sm text-[#667781] max-w-md">Send and receive messages without keeping your phone online.</p>
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-[#f0f2f5] dark:bg-[#222d34] border-l border-[#e9edef] dark:border-[#222d34]">
+                <h2 className="text-[32px] text-[#41525d] dark:text-[#e9edef] font-light mb-4">WhatsApp Web Clone</h2>
+                <p className="text-sm text-[#667781] dark:text-[#8696a0] max-w-md">Send and receive messages without keeping your phone online.</p>
               </div>
             ) : (
               <>
-                <div className="h-[60px] bg-[#f0f2f5] flex items-center justify-between px-4 z-10 sticky top-0 border-l border-[#e9edef]">
+                <div className="h-[60px] bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between px-4 z-10 sticky top-0 border-l border-[#e9edef] dark:border-[#222d34]">
                   <div className="flex items-center gap-1">
-                    <button className="md:hidden text-[#54656f] mr-1" onClick={() => setActiveChat(null)}><ArrowLeft size={24} /></button>
-                    <div className="flex items-center gap-3 cursor-pointer hover:bg-black/5 p-1 rounded-lg transition-colors" onClick={() => setShowContactInfo(true)}>
-                      <div className="w-10 h-10 bg-[#dfe5e7] rounded-full flex items-center justify-center text-white overflow-hidden flex-shrink-0">
-                        {contactProfiles[activeChat]?.photo ? <img src={contactProfiles[activeChat].photo} alt="Profile" className="w-full h-full object-cover" /> : <span className="font-semibold text-[#a6b0b5]">{contactProfiles[activeChat]?.displayName ? contactProfiles[activeChat].displayName.charAt(0).toUpperCase() : activeChat.charAt(0).toUpperCase()}</span>}
+                    <button className="md:hidden text-[#54656f] dark:text-[#aebac1] mr-1" onClick={() => setActiveChat(null)}><ArrowLeft size={24} /></button>
+                    <div className="flex items-center gap-3 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 p-1 rounded-lg transition-colors" onClick={() => setShowContactInfo(true)}>
+                      <div className="w-10 h-10 bg-[#dfe5e7] dark:bg-[#6a7175] rounded-full flex items-center justify-center text-white overflow-hidden flex-shrink-0">
+                        {contactProfiles[activeChat]?.photo ? <img src={contactProfiles[activeChat].photo} alt="Profile" className="w-full h-full object-cover" /> : <span className="font-semibold text-[#a6b0b5] dark:text-white">{contactProfiles[activeChat]?.displayName ? contactProfiles[activeChat].displayName.charAt(0).toUpperCase() : activeChat.charAt(0).toUpperCase()}</span>}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h2 className="font-normal text-[#111b21]">{contactProfiles[activeChat]?.displayName || activeChat}</h2>
-                          {!isGroup && isOnline(contactProfiles[activeChat]?.lastSeen) && <div className="w-2.5 h-2.5 bg-[#25D366] rounded-full shadow-sm border border-[#f0f2f5]"></div>}
+                          <h2 className="font-normal text-[#111b21] dark:text-[#e9edef]">{contactProfiles[activeChat]?.displayName || activeChat}</h2>
+                          {!isGroup && isOnline(contactProfiles[activeChat]?.lastSeen) && <div className="w-2.5 h-2.5 bg-[#25D366] rounded-full shadow-sm border border-[#f0f2f5] dark:border-[#202c33]"></div>}
                         </div>
-                        <p className="text-xs text-[#667781] mt-0.5">{isGroup ? 'Group Chat' : (isOnline(contactProfiles[activeChat]?.lastSeen) ? 'Online' : 'Offline')}</p>
+                        <p className="text-xs text-[#667781] dark:text-[#8696a0] mt-0.5">{isGroup ? 'Group Chat' : (isOnline(contactProfiles[activeChat]?.lastSeen) ? 'Online' : 'Offline')}</p>
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-5 text-[#54656f] mr-2">
-                    <Video size={22} className="cursor-pointer hover:text-[#41525d] transition-colors" />
-                    <Phone size={20} className="cursor-pointer hover:text-[#41525d] transition-colors" />
+                  <div className="flex items-center gap-5 text-[#54656f] dark:text-[#aebac1] mr-2">
+                    <Video size={22} className="cursor-pointer hover:text-[#41525d] dark:hover:text-[#e9edef] transition-colors" />
+                    <Phone size={20} className="cursor-pointer hover:text-[#41525d] dark:hover:text-[#e9edef] transition-colors" />
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 md:px-[6%] lg:px-[9%] py-6 z-0" style={{backgroundImage: 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: 'contain', backgroundRepeat: 'repeat', opacity: 0.8}}>
+                <div className="flex-1 overflow-y-auto p-4 md:px-[6%] lg:px-[9%] py-6 z-0 transition-colors" style={{backgroundImage: wallpapers[activeChat] ? `url(${wallpapers[activeChat]})` : 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: wallpapers[activeChat] ? 'cover' : 'contain', backgroundPosition: 'center', backgroundRepeat: wallpapers[activeChat] ? 'no-repeat' : 'repeat', opacity: isDarkMode && !wallpapers[activeChat] ? 0.3 : 1}}>
                   {activeChatMessages.map((msg, i) => {
                     const isMe = msg.sender === currentUser;
                     const isFirstInGroup = i === 0 || activeChatMessages[i-1].sender !== msg.sender;
@@ -1178,24 +1254,42 @@ export default function WhatsAppClone() {
                     if (msg.type === 'system') {
                       return (
                         <div key={msg.id} className="flex justify-center my-2 w-full">
-                           <div className="bg-[#fff5c4] text-[#54656f] text-[12.5px] px-3 py-1.5 rounded-lg shadow-sm font-medium text-center max-w-[85%]">{msg.text}</div>
+                           <div className="bg-[#fff5c4] dark:bg-[#182229] text-[#54656f] dark:text-[#8696a0] text-[12.5px] px-3 py-1.5 rounded-lg shadow-sm font-medium text-center max-w-[85%] border dark:border-[#222d34]">{msg.text}</div>
                         </div>
                       );
                     }
 
                     return (
-                      <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-1`}>
-                        <div className={`relative max-w-[85%] md:max-w-[70%] rounded-lg px-2.5 pt-1.5 pb-2 shadow-sm ${isMe ? 'bg-[#d9fdd3]' : 'bg-white'} ${isFirstInGroup && isMe ? 'rounded-tr-none' : ''} ${isFirstInGroup && !isMe ? 'rounded-tl-none' : ''} ${isFirstInGroup ? 'mt-2' : ''}`}>
+                      <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-1 group`}>
+                        <div className={`relative max-w-[85%] md:max-w-[70%] rounded-lg px-2.5 pt-1.5 pb-2 shadow-sm ${isMe ? 'bg-[#d9fdd3] dark:bg-[#005c4b]' : 'bg-white dark:bg-[#202c33]'} ${isFirstInGroup && isMe ? 'rounded-tr-none' : ''} ${isFirstInGroup && !isMe ? 'rounded-tl-none' : ''} ${isFirstInGroup ? 'mt-2' : ''}`}>
                           <div className="flex flex-col">
                             {isGroup && !isMe && isFirstInGroup && <span className="text-xs font-bold text-[#e57373] mb-1">{contactProfiles[msg.sender]?.displayName || msg.sender}</span>}
+                            
+                            {/* Quoted Message Box */}
+                            {msg.reply_to_text && (
+                               <div className={`mb-1 p-2 rounded bg-black/5 dark:bg-black/20 border-l-4 ${isMe ? 'border-[#028b6d]' : 'border-[#00a884]'}`}>
+                                  <p className={`text-xs font-semibold ${isMe ? 'text-[#028b6d]' : 'text-[#00a884]'}`}>{msg.reply_to_sender}</p>
+                                  <p className="text-sm text-[#54656f] dark:text-[#aebac1] truncate max-w-[200px]">{msg.reply_to_text}</p>
+                               </div>
+                            )}
+
                             {msg.type === 'image' && msg.media && <img src={msg.media} alt="attachment" className="max-w-[250px] md:max-w-[300px] rounded-md mb-1 cursor-pointer object-cover" />}
                             {msg.type === 'document' && msg.media && <div className="flex items-center bg-black/5 p-2 rounded-md mb-1 w-48 truncate"><Paperclip size={16} className="mr-2 flex-shrink-0 text-[#667781]" /><a href={msg.media} download={msg.text} className="text-[#008069] font-medium underline text-sm truncate">{msg.text}</a></div>}
                             {msg.type === 'audio' && msg.media && <div className="flex items-center gap-2 mb-1 min-w-[200px]"><Mic size={20} className={isMe ? 'text-[#00a884]' : 'text-[#8696a0]'} /><audio controls src={msg.media} className="w-full h-8" /></div>}
-                            {(!msg.type || msg.type === 'text') && <span className="text-[14.2px] leading-[19px] text-[#111b21] whitespace-pre-wrap break-words pr-8">{msg.text}</span>}
+                            
+                            {/* Main Message Text (Handles Soft Delete) */}
+                            {(!msg.type || msg.type === 'text' || msg.type === 'deleted') && <span className={`text-[14.2px] leading-[19px] ${msg.is_deleted ? 'text-[#667781] dark:text-[#8696a0] italic' : 'text-[#111b21] dark:text-[#e9edef]'} whitespace-pre-wrap break-words pr-8`}>{msg.text}</span>}
+                            
                             <div className={`flex items-center justify-end gap-1 float-right self-end ${msg.type === 'audio' ? 'mt-1' : 'mt-[-10px]'}`}>
-                               <span className="text-[10px] text-[#667781] pt-1">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                               <span className="text-[10px] text-[#667781] dark:text-[#8696a0] pt-1">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                {isMe && <span className="pt-1">{msg.status === 'read' ? <CheckCheck size={13} className="text-[#53bdeb]" /> : msg.status === 'delivered' ? <CheckCheck size={13} className="text-[#8696a0]" /> : <Check size={13} className="text-[#667781]" />}</span>}
                             </div>
+                          </div>
+
+                          {/* Hover Actions (Reply & Delete) */}
+                          <div className={`absolute top-1 ${isMe ? 'left-[-60px]' : 'right-[-40px]'} opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white/80 dark:bg-[#111b21]/80 backdrop-blur rounded p-1 shadow-sm`}>
+                             {!msg.is_deleted && <button onClick={() => setReplyingTo(msg)} className="p-1 hover:text-[#00a884] text-[#8696a0] transition-colors"><CornerUpLeft size={16}/></button>}
+                             {isMe && !msg.is_deleted && <button onClick={() => handleDeleteMessage(msg.id)} className="p-1 hover:text-red-500 text-[#8696a0] transition-colors"><Trash2 size={16}/></button>}
                           </div>
                         </div>
                       </div>
@@ -1204,43 +1298,57 @@ export default function WhatsAppClone() {
                   <div ref={messagesEndRef} />
                 </div>
 
-                <div className="min-h-[62px] bg-[#f0f2f5] px-4 py-2 flex items-end gap-3 z-10 border-l border-[#e9edef] relative">
+                <div className="bg-[#f0f2f5] dark:bg-[#202c33] z-10 border-l border-[#e9edef] dark:border-[#222d34] relative flex flex-col">
                   {showEmojis && (
-                    <div className="absolute bottom-[70px] left-4 bg-white shadow-xl rounded-lg p-3 w-[280px] max-h-[300px] overflow-y-auto border border-[#e9edef] grid grid-cols-6 gap-2 z-50">
-                      {emojis.map(e => <button key={e} type="button" className="text-xl hover:bg-gray-100 rounded p-1 transition-colors" onClick={() => setInputText(prev => prev + e)}>{e}</button>)}
+                    <div className="absolute bottom-full mb-2 left-4 bg-white dark:bg-[#2a3942] shadow-xl rounded-lg p-3 w-[280px] max-h-[300px] overflow-y-auto border border-[#e9edef] dark:border-[#222d34] grid grid-cols-6 gap-2 z-50">
+                      {emojis.map(e => <button key={e} type="button" className="text-xl hover:bg-gray-100 dark:hover:bg-[#202c33] rounded p-1 transition-colors" onClick={() => setInputText(prev => prev + e)}>{e}</button>)}
                     </div>
                   )}
-                  <div className="flex items-center gap-3 text-[#54656f] pb-2">
-                    <button type="button" onClick={() => setShowEmojis(!showEmojis)}><Smile size={24} className="cursor-pointer hover:text-[#41525d] transition-colors" /></button>
-                    <button type="button" onClick={() => attachmentRef.current?.click()}><Paperclip size={24} className="cursor-pointer hover:text-[#41525d] transition-colors" /></button>
-                    <input type="file" ref={attachmentRef} onChange={handleFileUpload} className="hidden" />
-                  </div>
-                  {isRecording ? (
-                    <div className="flex-1 flex items-center justify-between bg-white rounded-lg px-4 py-2.5 h-[44px] mb-[2px] border border-transparent shadow-sm">
-                      <div className="flex items-center gap-3"><div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div><span className="text-[#41525d] font-medium tracking-wider">{formatTime(recordingTime)}</span></div>
-                      <button type="button" onClick={() => stopRecording(false)} className="text-[#8696a0] hover:text-red-500 transition-colors flex items-center gap-1 text-sm font-medium"><Trash2 size={18} /> Cancel</button>
+                  
+                  {/* Quoted Message Preview Box */}
+                  {replyingTo && (
+                    <div className="mx-4 mt-2 p-2 bg-black/5 dark:bg-black/20 rounded border-l-4 border-[#00a884] flex items-center justify-between">
+                       <div className="flex-1 truncate">
+                          <p className="text-[#00a884] font-medium text-sm">{replyingTo.sender === currentUser ? 'You' : replyingTo.sender}</p>
+                          <p className="text-[#54656f] dark:text-[#aebac1] text-sm truncate">{replyingTo.text}</p>
+                       </div>
+                       <button onClick={() => setReplyingTo(null)} className="p-2 text-[#8696a0] hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition-colors"><X size={18}/></button>
                     </div>
-                  ) : (
-                    <form onSubmit={handleSendMessage} className="flex-1 flex items-end bg-white rounded-lg overflow-hidden border border-transparent">
-                      <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(e); } }} placeholder="Type a message" className="w-full max-h-32 px-4 py-2.5 bg-transparent resize-none focus:outline-none text-[#41525d] text-sm md:text-base leading-snug" rows={1}/>
-                    </form>
                   )}
-                  <div className="text-[#54656f] pb-1.5 flex-shrink-0">
-                    {isRecording ? <button onClick={() => stopRecording(true)} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#00a884]"><Send size={24} /></button> : inputText.trim() ? <button onClick={handleSendMessage} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#54656f]"><Send size={24} /></button> : <button onClick={startRecording} className="p-2 rounded-full hover:bg-[#d9d9d9] transition-colors text-[#54656f]"><Mic size={24} /></button>}
+
+                  <div className="min-h-[62px] px-4 py-2 flex items-end gap-3">
+                    <div className="flex items-center gap-3 text-[#54656f] dark:text-[#aebac1] pb-2">
+                      <button type="button" onClick={() => setShowEmojis(!showEmojis)}><Smile size={24} className="cursor-pointer hover:text-[#41525d] dark:hover:text-[#e9edef] transition-colors" /></button>
+                      <button type="button" onClick={() => attachmentRef.current?.click()}><Paperclip size={24} className="cursor-pointer hover:text-[#41525d] dark:hover:text-[#e9edef] transition-colors" /></button>
+                      <input type="file" ref={attachmentRef} onChange={handleFileUpload} className="hidden" />
+                    </div>
+                    {isRecording ? (
+                      <div className="flex-1 flex items-center justify-between bg-white dark:bg-[#2a3942] rounded-lg px-4 py-2.5 h-[44px] mb-[2px] border border-transparent dark:border-[#222d34] shadow-sm">
+                        <div className="flex items-center gap-3"><div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div><span className="text-[#41525d] dark:text-[#d1d7db] font-medium tracking-wider">{formatTime(recordingTime)}</span></div>
+                        <button type="button" onClick={() => stopRecording(false)} className="text-[#8696a0] hover:text-red-500 transition-colors flex items-center gap-1 text-sm font-medium"><Trash2 size={18} /> Cancel</button>
+                      </div>
+                    ) : (
+                      <form onSubmit={handleSendMessage} className="flex-1 flex items-end bg-white dark:bg-[#2a3942] rounded-lg overflow-hidden border border-transparent dark:border-[#222d34]">
+                        <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(e); } }} placeholder="Type a message" className="w-full max-h-32 px-4 py-2.5 bg-transparent resize-none focus:outline-none text-[#41525d] dark:text-[#d1d7db] text-sm md:text-base leading-snug" rows={1}/>
+                      </form>
+                    )}
+                    <div className="text-[#54656f] dark:text-[#aebac1] pb-1.5 flex-shrink-0">
+                      {isRecording ? <button onClick={() => stopRecording(true)} className="p-2 rounded-full hover:bg-[#d9d9d9] dark:hover:bg-[#374248] transition-colors text-[#00a884]"><Send size={24} /></button> : inputText.trim() ? <button onClick={handleSendMessage} className="p-2 rounded-full hover:bg-[#d9d9d9] dark:hover:bg-[#374248] transition-colors text-[#54656f] dark:text-[#aebac1]"><Send size={24} /></button> : <button onClick={startRecording} className="p-2 rounded-full hover:bg-[#d9d9d9] dark:hover:bg-[#374248] transition-colors text-[#54656f] dark:text-[#aebac1]"><Mic size={24} /></button>}
+                    </div>
                   </div>
                 </div>
                 
                 {/* Contact Info Drawer */}
-                <div className={`absolute top-0 right-0 h-full w-full md:w-[350px] lg:w-[400px] bg-[#f0f2f5] z-50 transition-transform duration-300 ease-in-out border-l border-[#e9edef] shadow-2xl flex flex-col ${showContactInfo ? 'translate-x-0' : 'translate-x-full'}`}>
-                  <div className="h-[60px] bg-[#f0f2f5] flex items-center px-6 text-[#54656f] gap-6 shrink-0 border-b border-[#e9edef]">
+                <div className={`absolute top-0 right-0 h-full w-full md:w-[350px] lg:w-[400px] bg-[#f0f2f5] dark:bg-[#111b21] z-50 transition-transform duration-300 ease-in-out border-l border-[#e9edef] dark:border-[#222d34] shadow-2xl flex flex-col ${showContactInfo ? 'translate-x-0' : 'translate-x-full'}`}>
+                  <div className="h-[60px] bg-[#f0f2f5] dark:bg-[#202c33] flex items-center px-6 text-[#54656f] dark:text-[#aebac1] gap-6 shrink-0 border-b border-[#e9edef] dark:border-[#222d34]">
                     <button onClick={() => setShowContactInfo(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors"><ArrowLeft size={24} /></button>
-                    <h1 className="text-[16px] font-medium text-[#111b21]">{isGroup ? 'Group info' : 'Contact info'}</h1>
+                    <h1 className="text-[16px] font-medium text-[#111b21] dark:text-[#e9edef]">{isGroup ? 'Group info' : 'Contact info'}</h1>
                   </div>
                   
                   <div className="flex-1 overflow-y-auto pb-8">
-                    <div className="bg-white flex flex-col items-center py-8 shadow-sm mb-2 px-4 text-center relative group">
-                      <div className="w-48 h-48 rounded-full overflow-hidden bg-[#dfe5e7] flex items-center justify-center text-white mb-4 shadow-md relative">
-                        {activeProfile?.photo ? <img src={activeProfile.photo} alt="Profile" className="w-full h-full object-cover" /> : <User size={80} className="text-[#a6b0b5]" />}
+                    <div className="bg-white dark:bg-[#202c33] flex flex-col items-center py-8 shadow-sm mb-2 px-4 text-center relative group border-b dark:border-[#222d34]">
+                      <div className="w-48 h-48 rounded-full overflow-hidden bg-[#dfe5e7] dark:bg-[#6a7175] flex items-center justify-center text-white mb-4 shadow-md relative">
+                        {activeProfile?.photo ? <img src={activeProfile.photo} alt="Profile" className="w-full h-full object-cover" /> : <User size={80} className="text-[#a6b0b5] dark:text-[#8696a0]" />}
                         {isAdmin && (
                           <div className="absolute inset-0 bg-black/50 hidden group-hover:flex flex-col items-center justify-center cursor-pointer transition-all" onClick={() => groupPhotoRef.current?.click()}>
                             <Camera size={32} /><span className="text-sm mt-1">Change</span>
@@ -1250,46 +1358,58 @@ export default function WhatsAppClone() {
                       <input type="file" ref={groupPhotoRef} className="hidden" accept="image/*" onChange={handleGroupPhotoUpload} />
                       
                       <div className="flex items-center gap-2">
-                        <input value={editGroupName !== '' ? editGroupName : (activeProfile?.displayName || activeChat)} onChange={e => setEditGroupName(e.target.value)} disabled={!isAdmin} className={`text-2xl font-normal text-[#111b21] mb-1 text-center bg-transparent ${isAdmin ? 'border-b border-[#00a884] focus:outline-none' : ''}`} />
-                        {isAdmin && editGroupName && <button onClick={saveGroupName} className="text-[#00a884] hover:bg-gray-100 p-1 rounded-full"><Check size={20}/></button>}
+                        <input value={editGroupName !== '' ? editGroupName : (activeProfile?.displayName || activeChat)} onChange={e => setEditGroupName(e.target.value)} disabled={!isAdmin} className={`text-2xl font-normal text-[#111b21] dark:text-[#e9edef] mb-1 text-center bg-transparent ${isAdmin ? 'border-b border-[#00a884] focus:outline-none' : ''}`} />
+                        {isAdmin && editGroupName && <button onClick={saveGroupName} className="text-[#00a884] hover:bg-gray-100 dark:hover:bg-[#2a3942] p-1 rounded-full"><Check size={20}/></button>}
                       </div>
-                      <p className="text-[#667781] text-lg">{isGroup ? `Group · ${activeProfile?.groupMembers?.length || 0} participants` : (activeProfile?.contact || '~')}</p>
+                      <p className="text-[#667781] dark:text-[#8696a0] text-lg">{isGroup ? `Group · ${activeProfile?.groupMembers?.length || 0} participants` : (activeProfile?.contact || '~')}</p>
                     </div>
 
                     {!isGroup && (
-                      <div className="bg-white px-6 py-4 shadow-sm mb-2">
-                          <p className="text-[#667781] text-sm mb-2">About and phone number</p>
-                          <p className="text-[#111b21] text-base">{activeProfile?.contact || 'No contact info provided.'}</p>
+                      <div className="bg-white dark:bg-[#202c33] px-6 py-4 shadow-sm mb-2 border-b dark:border-[#222d34]">
+                          <p className="text-[#667781] dark:text-[#8696a0] text-sm mb-2">About and phone number</p>
+                          <p className="text-[#111b21] dark:text-[#e9edef] text-base">{activeProfile?.contact || 'No contact info provided.'}</p>
                       </div>
                     )}
+                    
+                    {/* Custom Wallpaper Setting */}
+                    <div className="bg-white dark:bg-[#202c33] px-6 py-4 shadow-sm mb-2 border-b dark:border-[#222d34] cursor-pointer hover:bg-gray-50 dark:hover:bg-[#2a3942] transition-colors flex items-center justify-between" onClick={() => customWallpaperRef.current?.click()}>
+                        <div className="flex items-center gap-4 text-[#111b21] dark:text-[#e9edef]">
+                           <ImageIcon size={24} className="text-[#8696a0]"/>
+                           <span className="text-base font-normal">Wallpaper</span>
+                        </div>
+                        {wallpapers[activeChat] && (
+                           <button onClick={(e) => { e.stopPropagation(); const newW = {...wallpapers}; delete newW[activeChat]; setWallpapers(newW); localStorage.setItem('whatsapp_wallpapers', JSON.stringify(newW)); }} className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 p-1.5 rounded-full text-sm">Remove</button>
+                        )}
+                        <input type="file" ref={customWallpaperRef} accept="image/*" className="hidden" onChange={handleCustomWallpaperUpload}/>
+                    </div>
 
                     {isGroup && (
-                      <div className="bg-white shadow-sm mb-2 pt-4 pb-2">
+                      <div className="bg-white dark:bg-[#202c33] shadow-sm mb-2 pt-4 pb-2 border-b dark:border-[#222d34]">
                         <div className="flex items-center justify-between px-6 mb-3">
-                           <p className="text-[#667781] text-sm font-medium">{activeProfile?.groupMembers?.length || 0} participants</p>
+                           <p className="text-[#667781] dark:text-[#8696a0] text-sm font-medium">{activeProfile?.groupMembers?.length || 0} participants</p>
                            {isAdmin && <button onClick={() => setShowAddParticipant(!showAddParticipant)} className="text-[#00a884] text-sm font-medium flex items-center gap-1 hover:underline"><UserPlus size={16}/> Add</button>}
                         </div>
                         {showAddParticipant && isAdmin && (
                           <form onSubmit={handleAddParticipant} className="px-6 mb-4 flex gap-2">
-                             <input value={newParticipant} onChange={e => setNewParticipant(e.target.value)} placeholder="Username" className="flex-1 bg-[#f0f2f5] px-3 py-2 rounded-lg text-sm focus:outline-none" />
+                             <input value={newParticipant} onChange={e => setNewParticipant(e.target.value)} placeholder="Username" className="flex-1 bg-[#f0f2f5] dark:bg-[#2a3942] text-[#e9edef] px-3 py-2 rounded-lg text-sm focus:outline-none" />
                              <button type="submit" className="bg-[#00a884] text-white px-3 py-2 rounded-lg text-sm font-medium">Add</button>
                           </form>
                         )}
                         {activeProfile?.groupMembers?.map(member => (
-                          <div key={member.username} className="flex items-center justify-between px-6 py-3 hover:bg-[#f5f6f6] transition-colors group">
+                          <div key={member.username} className="flex items-center justify-between px-6 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#2a3942] transition-colors group">
                             <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-[#dfe5e7] rounded-full overflow-hidden">
-                                {member.profile_photo ? <img src={member.profile_photo} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-white bg-[#a6b0b5] font-medium uppercase">{member.display_name?.charAt(0) || member.username.charAt(0)}</div>}
+                              <div className="w-10 h-10 bg-[#dfe5e7] dark:bg-[#6a7175] rounded-full overflow-hidden">
+                                {member.profile_photo ? <img src={member.profile_photo} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-white bg-[#a6b0b5] dark:bg-[#8696a0] font-medium uppercase">{member.display_name?.charAt(0) || member.username.charAt(0)}</div>}
                               </div>
                               <div className="flex flex-col">
-                                <span className="text-[#111b21]">{member.username === currentUser ? 'You' : (member.display_name || member.username)}</span>
+                                <span className="text-[#111b21] dark:text-[#e9edef]">{member.username === currentUser ? 'You' : (member.display_name || member.username)}</span>
                                 {member.role === 'admin' && <span className="text-xs text-[#00a884] border border-[#00a884] rounded px-1 w-fit mt-0.5">Admin</span>}
                               </div>
                             </div>
                             {isAdmin && member.username !== currentUser && (
                               <div className="hidden group-hover:flex gap-2">
-                                {member.role !== 'admin' ? <button onClick={() => handleGroupAction(member.username, 'admin')} title="Make Admin" className="p-1.5 text-gray-500 hover:text-[#00a884] bg-gray-100 rounded-full"><Shield size={16} /></button> : <button onClick={() => handleGroupAction(member.username, 'member')} title="Remove Admin" className="p-1.5 text-gray-500 hover:text-orange-500 bg-gray-100 rounded-full"><ShieldAlert size={16} /></button>}
-                                <button onClick={() => handleGroupAction(member.username, 'remove')} title="Remove User" className="p-1.5 text-gray-500 hover:text-red-500 bg-gray-100 rounded-full"><UserMinus size={16} /></button>
+                                {member.role !== 'admin' ? <button onClick={() => handleGroupAction(member.username, 'admin')} title="Make Admin" className="p-1.5 text-gray-500 hover:text-[#00a884] bg-gray-100 dark:bg-[#111b21] rounded-full"><Shield size={16} /></button> : <button onClick={() => handleGroupAction(member.username, 'member')} title="Remove Admin" className="p-1.5 text-gray-500 hover:text-orange-500 bg-gray-100 dark:bg-[#111b21] rounded-full"><ShieldAlert size={16} /></button>}
+                                <button onClick={() => handleGroupAction(member.username, 'remove')} title="Remove User" className="p-1.5 text-gray-500 hover:text-red-500 bg-gray-100 dark:bg-[#111b21] rounded-full"><UserMinus size={16} /></button>
                               </div>
                             )}
                           </div>
@@ -1297,7 +1417,7 @@ export default function WhatsAppClone() {
                       </div>
                     )}
 
-                    <button onClick={handleDeleteChat} className="text-[#ea0038] hover:bg-[#f5f6f6] flex items-center gap-4 w-full px-6 py-4 bg-white shadow-sm mt-4 transition-colors font-medium">
+                    <button onClick={handleDeleteChat} className="text-[#ea0038] hover:bg-[#f5f6f6] dark:hover:bg-[#2a3942] flex items-center gap-4 w-full px-6 py-4 bg-white dark:bg-[#202c33] shadow-sm mt-4 transition-colors font-medium border-y dark:border-[#222d34]">
                       <LogOut size={20} className="text-[#ea0038]" />
                       {isGroup ? 'Exit Group' : 'Delete Chat'}
                     </button>
