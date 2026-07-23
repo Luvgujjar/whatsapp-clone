@@ -16,48 +16,45 @@ export default function WhatsAppClone() {
   const [authMode, setAuthMode] = useState('signin');
   const [authError, setAuthError] = useState('');
   const [isLogged, setIsLogged] = useState(false);
+  
   const [messages, setMessages] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Theme & Wallpapers
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [wallpapers, setWallpapers] = useState({});
   const customWallpaperRef = useRef(null);
 
-  // Replies
   const [replyingTo, setReplyingTo] = useState(null);
+  const [typists, setTypists] = useState([]);
+  const lastTypingPing = useRef(0);
 
-  // Tab Management
   const [activeTab, setActiveTab] = useState('chats');
   const [statuses, setStatuses] = useState([]);
   const [viewingStatusUser, setViewingStatusUser] = useState(null);
   const [viewingStatusIndex, setViewingStatusIndex] = useState(0);
   const [statusProgress, setStatusProgress] = useState(0);
   const statusUploadRef = useRef(null);
+  
   const [isUploadingStatus, setIsUploadingStatus] = useState(false);
   const [statusError, setStatusError] = useState('');
 
-  // Status Views & Privacy
   const [showStatusPrivacy, setShowStatusPrivacy] = useState(false);
   const [hiddenUsers, setHiddenUsers] = useState([]);
   const [statusViewers, setStatusViewers] = useState([]);
   const [showViewersList, setShowViewersList] = useState(false);
 
-  // Group Creation
   const [newChatPrompt, setNewChatPrompt] = useState(false);
   const [newChatError, setNewChatError] = useState('');
   const [newChatTargets, setNewChatTargets] = useState('');
   const [groupSubject, setGroupSubject] = useState('');
   
-  // UI States
   const [showMenu, setShowMenu] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const attachmentRef = useRef(null);
   const emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥸','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🫣','🤭','🫢','🤫','🤥','😶','🫠','😐','🫤','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','💀','☠️','👻','👽','🤖','💩','🔥','✨','⭐','🌟','💯','❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','👍','👎','👏','🙌','👌','✌️','🤞','🤟','🤘','👋','🤝','🙏','💪','👀','🎉','🎊','🎁','🏆','🥇','🚀','🌈','⚡','☀️','🌙','⭐','🍕','🍔','🍟','🍎','🍉','🍇','🍓','☕','🍺','⚽','🏀','🎮','🎧','📱','💻','⌚','📷','🎥','🚗','✈️','🚆','🏠','🌍'];
   
-  // Profile & Contact Info
   const [showProfile, setShowProfile] = useState(false);
   const [showContactInfo, setShowContactInfo] = useState(false); 
   const [userProfile, setUserProfile] = useState({ displayName: '', photo: '' });
@@ -72,7 +69,6 @@ export default function WhatsAppClone() {
   const [contactProfiles, setContactProfiles] = useState({});
   const fetchingProfiles = useRef(new Set());
 
-  // Audio Recording
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const mediaRecorderRef = useRef(null);
@@ -83,7 +79,6 @@ export default function WhatsAppClone() {
   const lastSyncRef = useRef(0);
   const messagesEndRef = useRef(null);
 
-  // Load Preferences
   useEffect(() => {
     const savedDark = localStorage.getItem('whatsapp_dark') === 'true';
     setIsDarkMode(savedDark);
@@ -118,7 +113,6 @@ export default function WhatsAppClone() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, activeChat]);
 
-  // Derived state to group statuses by user
   const groupedStatuses = React.useMemo(() => {
     const map = {};
     statuses.forEach(s => {
@@ -146,7 +140,7 @@ export default function WhatsAppClone() {
          body: JSON.stringify({ statusId: currentStatus.id, viewer: currentUser })
        }).catch(()=>{});
     } else {
-       fetch(`/api/statuses/views?statusId=${currentStatus.id}`)
+       fetch(`/api/statuses/views?statusId=${currentStatus.id}&_t=${Date.now()}`, { cache: 'no-store' })
          .then(r => r.ok ? r.json() : [])
          .then(data => setStatusViewers(data || []))
          .catch(()=>{});
@@ -221,7 +215,7 @@ export default function WhatsAppClone() {
 
   useEffect(() => {
     if (isLogged) {
-      fetch(`/api/profile?username=${encodeURIComponent(currentUser)}`)
+      fetch(`/api/profile?username=${encodeURIComponent(currentUser)}&_t=${Date.now()}`, { cache: 'no-store' })
         .then(async res => {
            if (!res.ok) throw new Error(); 
            const data = await res.json();
@@ -232,7 +226,7 @@ export default function WhatsAppClone() {
            setEditName(data.display_name || currentUser);
         }).catch(()=>{});
 
-      fetch(`/api/statuses/privacy?username=${encodeURIComponent(currentUser)}`)
+      fetch(`/api/statuses/privacy?username=${encodeURIComponent(currentUser)}&_t=${Date.now()}`, { cache: 'no-store' })
         .then(r => r.ok ? r.json() : { hiddenUsers: [] })
         .then(d => setHiddenUsers(d.hiddenUsers || []))
         .catch(()=>{});
@@ -259,10 +253,10 @@ export default function WhatsAppClone() {
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/sync?user=${encodeURIComponent(currentUser)}&after=${lastSyncRef.current}`);
+        const syncRes = await fetch(`/api/sync?user=${encodeURIComponent(currentUser)}&after=${lastSyncRef.current}&_t=${Date.now()}`, { cache: 'no-store' });
         
         if (activeChat && isMounted) {
-            fetch(`/api/profile?username=${encodeURIComponent(activeChat)}`)
+            fetch(`/api/profile?username=${encodeURIComponent(activeChat)}&_t=${Date.now()}`, { cache: 'no-store' })
               .then(async r => { if (!r.ok) throw new Error(); return r.json(); })
               .then(data => {
                   if (isMounted && !data.error) {
@@ -282,24 +276,32 @@ export default function WhatsAppClone() {
         }
 
         if (isMounted) {
-           fetch(`/api/statuses?viewer=${encodeURIComponent(currentUser)}`)
+           fetch(`/api/statuses?viewer=${encodeURIComponent(currentUser)}&_t=${Date.now()}`, { cache: 'no-store' })
             .then(r => { if (!r.ok) throw new Error(); return r.json(); })
             .then(data => setStatuses(data))
             .catch(()=>{});
         }
 
-        if (!res.ok && res.status !== 204) throw new Error('Server error');
-        if (!isMounted || res.status === 204) return;
+        if (activeChat && isMounted) {
+           fetch(`/api/typing?chat_id=${encodeURIComponent(activeChat)}&user=${encodeURIComponent(currentUser)}&_t=${Date.now()}`, { cache: 'no-store' })
+             .then(r => r.json())
+             .then(data => { if (isMounted) setTypists(data.typists || []); })
+             .catch(()=>{});
+        } else if (isMounted) {
+           setTypists([]);
+        }
 
-        const newMsgs = await res.json();
+        if (!syncRes.ok && syncRes.status !== 204) throw new Error('Server error');
+        if (!isMounted || syncRes.status === 204) return;
+
+        const newMsgs = await syncRes.json();
         if (newMsgs && newMsgs.length > 0) {
-          const maxTimestamp = Math.max(...newMsgs.map(m => m.updated_at || m.timestamp));
+          const maxTimestamp = Math.max(...newMsgs.map(m => Number(m.updated_at || m.timestamp)));
           if (maxTimestamp > lastSyncRef.current) {
              lastSyncRef.current = maxTimestamp;
           }
           
           setMessages(prev => {
-            // MERGE FIX: Instead of ignoring existing messages, we overwrite them with the deleted/read updates!
             const map = new Map(prev.map(m => [m.id, m]));
             newMsgs.forEach(m => map.set(m.id, m));
             return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
@@ -567,10 +569,11 @@ export default function WhatsAppClone() {
       updated_at: Date.now(),
       status: 'sending',
       pending: true,
-      is_deleted: 0
+      is_deleted: 0,
+      reactions: "{}"
     };
+    
     setMessages(prev => [...prev, optimisticMsg]);
-    lastSyncRef.current = optimisticMsg.timestamp;
 
     try {
       const res = await fetch('/api/messages', {
@@ -580,7 +583,8 @@ export default function WhatsAppClone() {
       });
       if (res.ok) {
          const savedMsg = await res.json();
-         setMessages(prev => prev.map(m => m.id === optimisticMsg.id ? savedMsg : m));
+         // If a reaction happened locally while the request was in flight, preserve it
+         setMessages(prev => prev.map(m => m.id === optimisticMsg.id ? { ...savedMsg, reactions: m.reactions !== "{}" ? m.reactions : savedMsg.reactions } : m));
       }
     } catch (error) {}
   };
@@ -594,6 +598,57 @@ export default function WhatsAppClone() {
         body: JSON.stringify({ id: msgId, sender: currentUser })
       });
     } catch (e) { console.error(e); }
+  };
+
+  const handleReaction = async (msgId, emoji) => {
+     let newReactionsString = "{}";
+
+     setMessages(prev => prev.map(m => {
+        if (m.id === msgId) {
+           let parsed = {};
+           try { 
+               if (typeof m.reactions === 'string' && m.reactions.trim() !== '') {
+                   parsed = JSON.parse(m.reactions); 
+               } else if (typeof m.reactions === 'object' && m.reactions !== null) {
+                   parsed = { ...m.reactions };
+               }
+           } catch(e) {}
+           
+           if (parsed[currentUser] === emoji) delete parsed[currentUser];
+           else parsed[currentUser] = emoji;
+           
+           newReactionsString = JSON.stringify(parsed);
+           return { ...m, reactions: newReactionsString, updated_at: Date.now() };
+        }
+        return m;
+     }));
+
+     await fetch(`/api/messages/react`, {
+       method: 'POST',
+       headers: {'Content-Type': 'application/json'},
+       body: JSON.stringify({ id: msgId, newReactions: newReactionsString })
+     }).catch(()=>{});
+  };
+
+  const parseReactions = (reactionsData) => {
+     try {
+       let obj = {};
+       if (typeof reactionsData === 'string' && reactionsData.trim() !== '') {
+           obj = JSON.parse(reactionsData);
+       } else if (typeof reactionsData === 'object' && reactionsData !== null) {
+           obj = reactionsData;
+       }
+       
+       const counts = {};
+       let total = 0;
+       for (const [user, emoji] of Object.entries(obj)) {
+          counts[emoji] = (counts[emoji] || 0) + 1;
+          total++;
+       }
+       return { counts, total };
+     } catch(e) {
+       return { counts: {}, total: 0 };
+     }
   };
 
   const conversations = React.useMemo(() => {
@@ -668,7 +723,8 @@ export default function WhatsAppClone() {
     const fetchContactProfile = (contact) => {
       if (!contact || contactProfiles[contact] || fetchingProfiles.current.has(contact)) return;
       fetchingProfiles.current.add(contact);
-      fetch(`/api/profile?username=${encodeURIComponent(contact)}`)
+      
+      fetch(`/api/profile?username=${encodeURIComponent(contact)}&_t=${Date.now()}`, { cache: 'no-store' })
         .then(async res => { if (!res.ok) throw new Error(await res.text()); return res.json(); })
         .then(data => {
           if (!data.error) {
@@ -720,6 +776,18 @@ export default function WhatsAppClone() {
           setShowContactInfo(false);
           setNewChatPrompt(false);
           setNewChatTargets('');
+          
+          setContactProfiles(prev => ({
+            ...prev,
+            [targets[0]]: {
+              displayName: data.display_name || targets[0],
+              photo: data.profile_photo || '',
+              contact: data.contact || '',
+              lastSeen: data.last_seen || 0,
+              isGroup: false,
+              groupMembers: []
+            }
+          }));
         } else {
           setNewChatError('User not found. Check the username.');
         }
@@ -899,8 +967,11 @@ export default function WhatsAppClone() {
 
   const activeProfile = activeChat ? contactProfiles[activeChat] : null;
   const isGroup = activeChat?.startsWith('#group_');
-  const myRole = isGroup ? activeProfile?.groupMembers?.find(m => m.username === currentUser)?.role : null;
+  
+  // FIXED: Case-insensitive Admin role matching
+  const myRole = isGroup ? activeProfile?.groupMembers?.find(m => m.username?.toLowerCase() === currentUser?.toLowerCase())?.role : null;
   const isAdmin = myRole === 'admin';
+  
   const currentTypingWord = newChatTargets.split(',').pop().trim();
   const suggestions = currentTypingWord ? knownContacts.filter(c => c.toLowerCase().includes(currentTypingWord.toLowerCase()) && c !== currentUser) : [];
   const myStatuses = groupedStatuses[currentUser] || [];
@@ -944,7 +1015,6 @@ export default function WhatsAppClone() {
                       <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${isDarkMode ? 'left-[22px]' : 'left-1'}`}></div>
                    </div>
                 </div>
-
               </div>
             </div>
 
@@ -1018,7 +1088,7 @@ export default function WhatsAppClone() {
               </div>
             )}
 
-            {/* Status Tab OR Chat Tab */}
+            {}
             {activeTab === 'status' ? (
               <div className="flex-1 overflow-y-auto bg-white dark:bg-[#111b21] flex flex-col">
                 <div className="flex justify-between items-center px-4 py-3 bg-white dark:bg-[#111b21] border-b border-[#e9edef] dark:border-[#222d34]">
@@ -1126,9 +1196,10 @@ export default function WhatsAppClone() {
             )}
           </div>
 
-          {/* Right Chat Area OR Status Viewer */}
+          {}
           <div className={`flex-col flex-1 bg-[#efeae2] dark:bg-[#0b141a] relative overflow-hidden ${!activeChat && !viewingStatusUser ? 'hidden md:flex' : 'flex'}`}>
             
+            {/* Status Viewer Wrapper */}
             {viewingStatusUser ? (() => {
               const currentStatus = groupedStatuses[viewingStatusUser][viewingStatusIndex];
               return (
@@ -1236,7 +1307,12 @@ export default function WhatsAppClone() {
                           <h2 className="font-normal text-[#111b21] dark:text-[#e9edef]">{contactProfiles[activeChat]?.displayName || activeChat}</h2>
                           {!isGroup && isOnline(contactProfiles[activeChat]?.lastSeen) && <div className="w-2.5 h-2.5 bg-[#25D366] rounded-full shadow-sm border border-[#f0f2f5] dark:border-[#202c33]"></div>}
                         </div>
-                        <p className="text-xs text-[#667781] dark:text-[#8696a0] mt-0.5">{isGroup ? 'Group Chat' : (isOnline(contactProfiles[activeChat]?.lastSeen) ? 'Online' : 'Offline')}</p>
+                        <p className="text-xs text-[#667781] dark:text-[#8696a0] mt-0.5 truncate max-w-[250px]">
+                           {typists.length > 0 
+                             ? <span className="text-[#00a884] font-medium">{isGroup ? `${typists.join(', ')} is typing...` : 'typing...'}</span> 
+                             : (isGroup ? 'Group Chat' : (isOnline(contactProfiles[activeChat]?.lastSeen) ? 'Online' : 'Offline'))
+                           }
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -1246,6 +1322,7 @@ export default function WhatsAppClone() {
                   </div>
                 </div>
 
+                {}
                 <div className="flex-1 overflow-y-auto p-4 md:px-[6%] lg:px-[9%] py-6 z-0 transition-colors" style={{backgroundImage: wallpapers[activeChat] ? `url(${wallpapers[activeChat]})` : 'url("https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png")', backgroundSize: wallpapers[activeChat] ? 'cover' : 'contain', backgroundPosition: 'center', backgroundRepeat: wallpapers[activeChat] ? 'no-repeat' : 'repeat', opacity: isDarkMode && !wallpapers[activeChat] ? 0.3 : 1}}>
                   {activeChatMessages.map((msg, i) => {
                     const isMe = msg.sender === currentUser;
@@ -1277,7 +1354,7 @@ export default function WhatsAppClone() {
                             {msg.type === 'document' && msg.media && <div className="flex items-center bg-black/5 p-2 rounded-md mb-1 w-48 truncate"><Paperclip size={16} className="mr-2 flex-shrink-0 text-[#667781]" /><a href={msg.media} download={msg.text} className="text-[#008069] font-medium underline text-sm truncate">{msg.text}</a></div>}
                             {msg.type === 'audio' && msg.media && <div className="flex items-center gap-2 mb-1 min-w-[200px]"><Mic size={20} className={isMe ? 'text-[#00a884]' : 'text-[#8696a0]'} /><audio controls src={msg.media} className="w-full h-8" /></div>}
                             
-                            {/* Main Message Text (Handles Soft Delete) */}
+                            {/* Main Message Text */}
                             {(!msg.type || msg.type === 'text' || msg.type === 'deleted') && <span className={`text-[14.2px] leading-[19px] ${msg.is_deleted ? 'text-[#667781] dark:text-[#8696a0] italic' : 'text-[#111b21] dark:text-[#e9edef]'} whitespace-pre-wrap break-words pr-8`}>{msg.text}</span>}
                             
                             <div className={`flex items-center justify-end gap-1 float-right self-end ${msg.type === 'audio' ? 'mt-1' : 'mt-[-10px]'}`}>
@@ -1286,8 +1363,33 @@ export default function WhatsAppClone() {
                             </div>
                           </div>
 
-                          {/* Hover Actions (Reply & Delete) */}
-                          <div className={`absolute top-1 ${isMe ? 'left-[-60px]' : 'right-[-40px]'} opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white/80 dark:bg-[#111b21]/80 backdrop-blur rounded p-1 shadow-sm`}>
+                          {/* Reactions Display Bottom */}
+                          {msg.reactions && msg.reactions !== '{}' && (() => {
+                             const { counts, total } = parseReactions(msg.reactions);
+                             if (total === 0) return null;
+                             return (
+                                <div className={`flex items-center gap-1 absolute bottom-[-10px] ${isMe ? 'right-2' : 'left-2'} bg-white dark:bg-[#2a3942] rounded-full px-1.5 py-0.5 text-[11px] shadow-sm border border-gray-100 dark:border-[#222d34] z-10 cursor-pointer`}>
+                                   {Object.keys(counts).map(em => <span key={em}>{em}</span>)}
+                                   <span className="text-gray-500 font-medium">{total > 1 ? total : ''}</span>
+                                </div>
+                             );
+                          })()}
+
+                          {/* Hover Actions (Reactions locked if message is pending to prevent race conditions) */}
+                          <div className={`absolute top-1 ${isMe ? 'left-[-90px]' : 'right-[-60px]'} opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 bg-white/80 dark:bg-[#111b21]/80 backdrop-blur rounded p-1 shadow-sm z-20`}>
+                             {!msg.is_deleted && !msg.pending && (
+                                <div className="relative group/react pb-2 -mb-2">
+                                   <button className="p-1 hover:text-[#00a884] text-[#8696a0] transition-colors"><Smile size={16}/></button>
+                                   
+                                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 pb-1 hidden group-hover/react:flex z-50">
+                                      <div className="bg-white dark:bg-[#2a3942] rounded-full shadow-lg p-1.5 border border-gray-100 dark:border-[#222d34] flex gap-1">
+                                         {['👍', '❤️', '😂', '😮', '😢', '🙏'].map(em => (
+                                            <button key={em} onClick={(e) => { e.stopPropagation(); handleReaction(msg.id, em); }} className="hover:scale-125 transition-transform text-lg leading-none">{em}</button>
+                                         ))}
+                                      </div>
+                                   </div>
+                                </div>
+                             )}
                              {!msg.is_deleted && <button onClick={() => setReplyingTo(msg)} className="p-1 hover:text-[#00a884] text-[#8696a0] transition-colors"><CornerUpLeft size={16}/></button>}
                              {isMe && !msg.is_deleted && <button onClick={() => handleDeleteMessage(msg.id)} className="p-1 hover:text-red-500 text-[#8696a0] transition-colors"><Trash2 size={16}/></button>}
                           </div>
@@ -1295,12 +1397,28 @@ export default function WhatsAppClone() {
                       </div>
                     );
                   })}
+                  
+                  {/* Bouncing Typing Indicator */}
+                  {typists.length > 0 && (
+                     <div className="flex justify-start mb-1 mt-2">
+                       <div className="relative rounded-lg px-3 py-2.5 shadow-sm bg-white dark:bg-[#202c33] rounded-tl-none flex items-center gap-1.5 w-fit h-[36px]">
+                         <svg viewBox="0 0 8 13" width="8" height="13" className="absolute top-0 left-[-8px] text-white dark:text-[#202c33] fill-current">
+                           <path d="M5.188 1H0v11.193l6.467-8.625C7.526 2.156 6.958 1 5.188 1z" transform="matrix(-1 0 0 1 8 0)"></path>
+                         </svg>
+                         <span className="w-1.5 h-1.5 bg-[#8696a0] rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                         <span className="w-1.5 h-1.5 bg-[#8696a0] rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                         <span className="w-1.5 h-1.5 bg-[#8696a0] rounded-full animate-bounce"></span>
+                       </div>
+                     </div>
+                  )}
+
                   <div ref={messagesEndRef} />
                 </div>
 
+                {}
                 <div className="bg-[#f0f2f5] dark:bg-[#202c33] z-10 border-l border-[#e9edef] dark:border-[#222d34] relative flex flex-col">
                   {showEmojis && (
-                    <div className="absolute bottom-full mb-2 left-4 bg-white dark:bg-[#2a3942] shadow-xl rounded-lg p-3 w-[280px] max-h-[300px] overflow-y-auto border border-[#e9edef] dark:border-[#222d34] grid grid-cols-6 gap-2 z-50">
+                    <div className="absolute bottom-[70px] left-4 bg-white dark:bg-[#2a3942] shadow-xl rounded-lg p-3 w-[280px] max-h-[300px] overflow-y-auto border border-[#e9edef] dark:border-[#222d34] grid grid-cols-6 gap-2 z-50">
                       {emojis.map(e => <button key={e} type="button" className="text-xl hover:bg-gray-100 dark:hover:bg-[#202c33] rounded p-1 transition-colors" onClick={() => setInputText(prev => prev + e)}>{e}</button>)}
                     </div>
                   )}
@@ -1318,7 +1436,9 @@ export default function WhatsAppClone() {
 
                   <div className="min-h-[62px] px-4 py-2 flex items-end gap-3">
                     <div className="flex items-center gap-3 text-[#54656f] dark:text-[#aebac1] pb-2">
-                      <button type="button" onClick={() => setShowEmojis(!showEmojis)}><Smile size={24} className="cursor-pointer hover:text-[#41525d] dark:hover:text-[#e9edef] transition-colors" /></button>
+                      <div className="relative group/emojipicker pb-2 -mb-2 cursor-pointer">
+                        <button type="button" onClick={() => setShowEmojis(!showEmojis)}><Smile size={24} className="hover:text-[#41525d] dark:hover:text-[#e9edef] transition-colors" /></button>
+                      </div>
                       <button type="button" onClick={() => attachmentRef.current?.click()}><Paperclip size={24} className="cursor-pointer hover:text-[#41525d] dark:hover:text-[#e9edef] transition-colors" /></button>
                       <input type="file" ref={attachmentRef} onChange={handleFileUpload} className="hidden" />
                     </div>
@@ -1329,7 +1449,26 @@ export default function WhatsAppClone() {
                       </div>
                     ) : (
                       <form onSubmit={handleSendMessage} className="flex-1 flex items-end bg-white dark:bg-[#2a3942] rounded-lg overflow-hidden border border-transparent dark:border-[#222d34]">
-                        <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(e); } }} placeholder="Type a message" className="w-full max-h-32 px-4 py-2.5 bg-transparent resize-none focus:outline-none text-[#41525d] dark:text-[#d1d7db] text-sm md:text-base leading-snug" rows={1}/>
+                        <textarea 
+                          value={inputText} 
+                          onChange={(e) => {
+                             setInputText(e.target.value);
+                             if (e.target.value.trim() !== '' && activeChat) {
+                                if (Date.now() - lastTypingPing.current > 1500) {
+                                  lastTypingPing.current = Date.now();
+                                  fetch('/api/typing', { 
+                                    method: 'POST', 
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ username: currentUser, chat_id: activeChat })
+                                  }).catch(()=>{});
+                                }
+                             }
+                          }} 
+                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(e); } }} 
+                          placeholder="Type a message" 
+                          className="w-full max-h-32 px-4 py-2.5 bg-transparent resize-none focus:outline-none text-[#41525d] dark:text-[#d1d7db] text-sm md:text-base leading-snug" 
+                          rows={1}
+                        />
                       </form>
                     )}
                     <div className="text-[#54656f] dark:text-[#aebac1] pb-1.5 flex-shrink-0">
@@ -1338,7 +1477,7 @@ export default function WhatsAppClone() {
                   </div>
                 </div>
                 
-                {/* Contact Info Drawer */}
+                {}
                 <div className={`absolute top-0 right-0 h-full w-full md:w-[350px] lg:w-[400px] bg-[#f0f2f5] dark:bg-[#111b21] z-50 transition-transform duration-300 ease-in-out border-l border-[#e9edef] dark:border-[#222d34] shadow-2xl flex flex-col ${showContactInfo ? 'translate-x-0' : 'translate-x-full'}`}>
                   <div className="h-[60px] bg-[#f0f2f5] dark:bg-[#202c33] flex items-center px-6 text-[#54656f] dark:text-[#aebac1] gap-6 shrink-0 border-b border-[#e9edef] dark:border-[#222d34]">
                     <button onClick={() => setShowContactInfo(false)} className="hover:bg-black/10 p-1 rounded-full transition-colors"><ArrowLeft size={24} /></button>
@@ -1371,7 +1510,6 @@ export default function WhatsAppClone() {
                       </div>
                     )}
                     
-                    {/* Custom Wallpaper Setting */}
                     <div className="bg-white dark:bg-[#202c33] px-6 py-4 shadow-sm mb-2 border-b dark:border-[#222d34] cursor-pointer hover:bg-gray-50 dark:hover:bg-[#2a3942] transition-colors flex items-center justify-between" onClick={() => customWallpaperRef.current?.click()}>
                         <div className="flex items-center gap-4 text-[#111b21] dark:text-[#e9edef]">
                            <ImageIcon size={24} className="text-[#8696a0]"/>
@@ -1387,7 +1525,11 @@ export default function WhatsAppClone() {
                       <div className="bg-white dark:bg-[#202c33] shadow-sm mb-2 pt-4 pb-2 border-b dark:border-[#222d34]">
                         <div className="flex items-center justify-between px-6 mb-3">
                            <p className="text-[#667781] dark:text-[#8696a0] text-sm font-medium">{activeProfile?.groupMembers?.length || 0} participants</p>
-                           {isAdmin && <button onClick={() => setShowAddParticipant(!showAddParticipant)} className="text-[#00a884] text-sm font-medium flex items-center gap-1 hover:underline"><UserPlus size={16}/> Add</button>}
+                           {isAdmin && (
+                              <button onClick={() => setShowAddParticipant(!showAddParticipant)} className="text-[#00a884] text-sm font-medium flex items-center gap-1 hover:underline">
+                                <UserPlus size={16}/> Add
+                              </button>
+                           )}
                         </div>
                         {showAddParticipant && isAdmin && (
                           <form onSubmit={handleAddParticipant} className="px-6 mb-4 flex gap-2">
